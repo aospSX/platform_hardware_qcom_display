@@ -122,6 +122,7 @@ void closeContext(hwc_context_t *ctx);
 void calculate_crop_rects(hwc_rect_t& crop, hwc_rect_t& dst,
         const int fbWidth, const int fbHeight, int orient);
 bool isSecuring(hwc_context_t* ctx);
+int hwc_vsync_control(hwc_context_t* ctx, int dpy, int enable);
 
 //Sync point impl.
 int hwc_sync(hwc_context_t *ctx, hwc_display_contents_1_t* list, int dpy);
@@ -180,6 +181,7 @@ struct vsync_state {
     pthread_mutex_t lock;
     pthread_cond_t  cond;
     bool enable;
+    bool fakevsync;
 };
 
 // -----------------------------------------------------------------------------
