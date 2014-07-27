@@ -31,8 +31,7 @@
 #define GRALLOC_IONALLOC_H
 
 #include "memalloc.h"
-#include "gr.h"
-#include <linux/ion.h>
+#include "ion_msm.h"
 
 namespace gralloc {
 
@@ -63,8 +62,6 @@ namespace gralloc {
             int open_device();
 
             void close_device();
-
-            mutable Locker mLock;
 
     };
 

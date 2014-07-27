@@ -37,8 +37,6 @@
 #include "pmemalloc.h"
 #include "pmem_bestfit_alloc.h"
 
-#define DEBUG_PMEM (0)
-
 using namespace gralloc;
 using android::sp;
 
@@ -89,7 +87,7 @@ static int alignPmem(int fd, size_t size, int align) {
     struct pmem_allocation allocation;
     allocation.size = size;
     allocation.align = align;
-    if (ioctl(fd, PMEM_ALLOCATE_ALIGNED, &allocation) < 0)
+    if (ioctl(fd, PMEM_ALLOCATE_ALIGNED, &allocation))
         return -errno;
     return 0;
 }
@@ -119,15 +117,15 @@ PmemUserspaceAlloc::~PmemUserspaceAlloc()
 
 int PmemUserspaceAlloc::init_pmem_area_locked()
 {
-    LOGD("%s: Opening master pmem FD", __FUNCTION__);
+    ALOGD("%s: Opening master pmem FD", __FUNCTION__);
     int err = 0;
     int fd = open(mPmemDev, O_RDWR, 0);
     if (fd >= 0) {
         size_t size = 0;
         err = getPmemTotalSize(fd, &size);
-        LOGD("%s: Total pmem size: %d", __FUNCTION__, size);
+        ALOGD("%s: Total pmem size: %d", __FUNCTION__, size);
         if (err < 0) {
-            LOGE("%s: PMEM_GET_TOTAL_SIZE failed (%d), limp mode", mPmemDev,
+            ALOGE("%s: PMEM_GET_TOTAL_SIZE failed (%d), limp mode", mPmemDev,
                     err);
             size = 8<<20;   // 8 MiB
         }
@@ -137,7 +135,7 @@ int PmemUserspaceAlloc::init_pmem_area_locked()
                 0);
         if (base == MAP_FAILED) {
             err = -errno;
-            LOGE("%s: Failed to map pmem master fd: %s", mPmemDev,
+            ALOGE("%s: Failed to map pmem master fd: %s", mPmemDev,
                     strerror(errno));
             base = 0;
             close(fd);
@@ -148,7 +146,7 @@ int PmemUserspaceAlloc::init_pmem_area_locked()
         }
     } else {
         err = -errno;
-        LOGE("%s: Failed to open pmem device: %s", mPmemDev,
+        ALOGE("%s: Failed to open pmem device: %s", mPmemDev,
                 strerror(errno));
     }
     return err;
@@ -160,10 +158,10 @@ int  PmemUserspaceAlloc::init_pmem_area()
     int err = mMasterFd;
     if (err == FD_INIT) {
         // first time, try to initialize pmem
-        LOGD("%s: Initializing pmem area", __FUNCTION__);
+        ALOGD("%s: Initializing pmem area", __FUNCTION__);
         err = init_pmem_area_locked();
         if (err) {
-            LOGE("%s: failed to initialize pmem area", mPmemDev);
+            ALOGE("%s: failed to initialize pmem area", mPmemDev);
             mMasterFd = err;
         }
     } else if (err < 0) {
@@ -186,7 +184,7 @@ int PmemUserspaceAlloc::alloc_buffer(alloc_data& data)
         int offset = mAllocator->allocate(size);
         if (offset < 0) {
             // no more pmem memory
-            LOGE("%s: No more pmem available", mPmemDev);
+            ALOGE("%s: No more pmem available", mPmemDev);
             err = -ENOMEM;
         } else {
             int openFlags = getOpenFlags(data.uncached);
@@ -204,19 +202,19 @@ int PmemUserspaceAlloc::alloc_buffer(alloc_data& data)
                 err = mapSubRegion(fd, offset, size);
 
             if (err < 0) {
-                LOGE("%s: Failed to initialize pmem sub-heap: %d", mPmemDev,
+                ALOGE("%s: Failed to initialize pmem sub-heap: %d", mPmemDev,
                         err);
                 close(fd);
                 mAllocator->deallocate(offset);
                 fd = -1;
             } else {
-                LOGD_IF(DEBUG_PMEM,"%s: Allocated buffer base:%p size:%d offset:%d fd:%d",
+                ALOGD("%s: Allocated buffer base:%p size:%d offset:%d fd:%d",
                         mPmemDev, base, size, offset, fd);
                 memset((char*)base + offset, 0, size);
                 //Clean cache before flushing to ensure pmem is properly flushed
                 err = clean_buffer((void*)((intptr_t) base + offset), size, offset, fd);
                 if (err < 0) {
-                    LOGE("cleanPmem failed: (%s)", strerror(errno));
+                    ALOGE("cleanPmem failed: (%s)", strerror(errno));
                 }
                 cacheflush(intptr_t(base) + offset, intptr_t(base) + offset + size, 0);
                 data.base = base;
@@ -231,12 +229,12 @@ int PmemUserspaceAlloc::alloc_buffer(alloc_data& data)
 
 int PmemUserspaceAlloc::free_buffer(void* base, size_t size, int offset, int fd)
 {
-    LOGD_IF(DEBUG_PMEM,"%s: Freeing buffer base:%p size:%d offset:%d fd:%d",
+    ALOGD("%s: Freeing buffer base:%p size:%d offset:%d fd:%d",
             mPmemDev, base, size, offset, fd);
     int err = 0;
     if (fd >= 0) {
         int err = unmapSubRegion(fd, offset, size);
-        LOGE_IF(err<0, "PMEM_UNMAP failed (%s), fd=%d, sub.offset=%u, "
+        ALOGE_IF(err<0, "PMEM_UNMAP failed (%s), fd=%d, sub.offset=%u, "
                 "sub.size=%u", strerror(errno), fd, offset, size);
         if (err == 0) {
             // we can't deallocate the memory in case of UNMAP failure
@@ -258,10 +256,10 @@ int PmemUserspaceAlloc::map_buffer(void **pBase, size_t size, int offset, int fd
     *pBase = base;
     if(base == MAP_FAILED) {
         err = -errno;
-        LOGE("%s: Failed to map buffer size:%d offset:%d fd:%d Error: %s",
+        ALOGE("%s: Failed to map buffer size:%d offset:%d fd:%d Error: %s",
                 mPmemDev, size, offset, fd, strerror(errno));
     } else {
-        LOGD_IF(DEBUG_PMEM,"%s: Mapped buffer base:%p size:%d offset:%d fd:%d",
+        ALOGD("%s: Mapped buffer base:%p size:%d offset:%d fd:%d",
                 mPmemDev, base, size, offset, fd);
     }
     return err;
@@ -274,11 +272,12 @@ int PmemUserspaceAlloc::unmap_buffer(void *base, size_t size, int offset)
     //pmem hack
     base = (void*)(intptr_t(base) - offset);
     size += offset;
-    LOGD_IF(DEBUG_PMEM,"%s: Unmapping buffer base:%p size:%d offset:%d",
+    ALOGD("%s: Unmapping buffer base:%p size:%d offset:%d",
             mPmemDev , base, size, offset);
     if (munmap(base, size) < 0) {
+
         err = -errno;
-        LOGE("%s: Failed to unmap memory at %p :%s",
+        ALOGE("%s: Failed to unmap memory at %p :%s",
                    mPmemDev, base, strerror(errno));
 
     }
@@ -312,7 +311,7 @@ int PmemKernelAlloc::alloc_buffer(alloc_data& data)
     int fd = open(mPmemDev, openFlags, 0);
     if (fd < 0) {
         err = -errno;
-        LOGE("%s: Error opening %s", __FUNCTION__, mPmemDev);
+        ALOGE("%s: Error opening %s", __FUNCTION__, mPmemDev);
         return err;
     }
 
@@ -321,13 +320,13 @@ int PmemKernelAlloc::alloc_buffer(alloc_data& data)
         // Default page size does not need this ioctl
         err = alignPmem(fd, size, 8192);
         if (err < 0) {
-            LOGE("alignPmem failed");
+            ALOGE("alignPmem failed");
         }
     }
     void* base = mmap(0, size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
     if (base == MAP_FAILED) {
         err = -errno;
-        LOGE("%s: failed to map pmem fd: %s", mPmemDev,
+        ALOGE("%s: failed to map pmem fd: %s", mPmemDev,
                 strerror(errno));
         close(fd);
         return err;
@@ -337,7 +336,7 @@ int PmemKernelAlloc::alloc_buffer(alloc_data& data)
     data.base = base;
     data.offset = 0;
     data.fd = fd;
-    LOGD_IF(DEBUG_PMEM,"%s: Allocated buffer base:%p size:%d fd:%d",
+    ALOGD("%s: Allocated buffer base:%p size:%d fd:%d",
                             mPmemDev, base, size, fd);
     return 0;
 
@@ -345,7 +344,7 @@ int PmemKernelAlloc::alloc_buffer(alloc_data& data)
 
 int PmemKernelAlloc::free_buffer(void* base, size_t size, int offset, int fd)
 {
-    LOGD_IF(DEBUG_PMEM,"%s: Freeing buffer base:%p size:%d fd:%d",
+    ALOGD("%s: Freeing buffer base:%p size:%d fd:%d",
             mPmemDev, base, size, fd);
 
     int err =  unmap_buffer(base, size, offset);
@@ -361,10 +360,10 @@ int PmemKernelAlloc::map_buffer(void **pBase, size_t size, int offset, int fd)
     *pBase = base;
     if(base == MAP_FAILED) {
         err = -errno;
-        LOGE("%s: Failed to map memory in the client: %s",
+        ALOGE("%s: Failed to map memory in the client: %s",
                 mPmemDev, strerror(errno));
     } else {
-        LOGD_IF(DEBUG_PMEM,"%s: Mapped buffer base:%p size:%d, fd:%d",
+        ALOGD("%s: Mapped buffer base:%p size:%d, fd:%d",
                                 mPmemDev, base, size, fd);
     }
     return err;
@@ -376,7 +375,7 @@ int PmemKernelAlloc::unmap_buffer(void *base, size_t size, int offset)
     int err = 0;
     if (munmap(base, size)) {
         err = -errno;
-        LOGE("%s: Error unmapping memory at %p: %s",
+        ALOGW("%s: Error unmapping memory at %p: %s",
                                 mPmemDev, base, strerror(err));
     }
     return err;

@@ -43,7 +43,6 @@
 #include <utils/RefBase.h>
 #include <alloc_controller.h>
 #include <memalloc.h>
-#include <qcom_ui.h>
 
 #ifdef USES_POST_PROCESSING
 #include "lib-postproc.h"
@@ -61,7 +60,6 @@
 #define FRAMEBUFFER_0 0
 #define FRAMEBUFFER_1 1
 #define FRAMEBUFFER_2 2
-
 #define NUM_SHARPNESS_VALS 256
 #define SHARPNESS_RANGE 1.0f
 #define HUE_RANGE 180
@@ -216,6 +214,7 @@ int getColorFormat(int format);
 bool isInterlacedContent(int format);
 int get_mdp_format(int format);
 int get_size(int format, int w, int h);
+int get_rot_output_format(int format);
 int get_mdp_orientation(int value);
 void normalize_crop(uint32_t& xy, uint32_t& wh);
 //Initializes the overlay - cleans up any existing overlay pipes
@@ -333,7 +332,7 @@ public:
     bool getAspectRatioPosition(int w, int h, int orientation,
                                 overlay_rect *inRect, overlay_rect *outRect);
     bool getPositionS3D(int channel, int format, overlay_rect *rect);
-    bool updateOverlaySource(const overlay_buffer_info& info, int flags);
+    bool updateOverlaySource(const overlay_buffer_info& info, int orientation, int flags);
     bool getFormat() const { return mFormat; }
     bool setVisualParam(int8_t paramType, float paramValue);
     bool useVirtualFB ();
@@ -357,12 +356,12 @@ class OverlayDataChannel {
     int mCurrentItem;
     int mNumBuffers;
     bool mUpdateDataChannel;
+    android::sp<gralloc::IAllocController> mAlloc;
     int mBufferType;
 
     bool openDevices(int fbnum = -1, bool uichannel = false, int num_buffers = 2);
     bool mapRotatorMemory(int num_buffers, bool uiChannel, int requestType);
     bool queue(uint32_t offset);
-    bool freeRotatorMemory(void *pmemAddr, uint32_t pmemOffset, int pmemFD);
 
 public:
     OverlayDataChannel();
@@ -400,8 +399,6 @@ class Overlay {
     int mState;
     // Stores the current device orientation
     int mDevOrientation;
-    //Store the Actual buffer Orientation
-    int mSrcOrientation;
     OverlayControlChannel objOvCtrlChannel[2];
     OverlayDataChannel    objOvDataChannel[2];
 
@@ -440,7 +437,7 @@ private:
     bool setChannelPosition(int x, int y, uint32_t w, uint32_t h, int channel = 0);
     bool setChannelCrop(uint32_t x, uint32_t y, uint32_t w, uint32_t h, int channel);
     bool queueBuffer(int fd, uint32_t offset, int channel);
-    bool updateOverlaySource(const overlay_buffer_info& info, int flags);
+    bool updateOverlaySource(const overlay_buffer_info& info, int orientation, int flags);
     int getS3DFormat(int format);
 };
 

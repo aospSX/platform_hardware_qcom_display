@@ -84,7 +84,7 @@ int gpu_context_t::gralloc_alloc_framebuffer_locked(size_t size, int usage,
     }
 
     if (m->framebuffer == NULL) {
-        LOGE("%s: Invalid framebuffer", __FUNCTION__);
+        ALOGE("%s: Invalid framebuffer", __FUNCTION__);
         return -EINVAL;
     }
 
@@ -186,7 +186,7 @@ int gpu_context_t::gralloc_alloc_buffer(size_t size, int usage,
         *pHandle = hnd;
     }
 
-    LOGE_IF(err, "gralloc failed err=%s", strerror(-err));
+    ALOGE_IF(err, "gralloc failed err=%s", strerror(-err));
     return err;
 }
 
@@ -234,8 +234,7 @@ int gpu_context_t::alloc_impl(int w, int h, int format, int usage,
     // All buffers marked as protected or for external
     // display need to go to overlay
     if ((usage & GRALLOC_USAGE_EXTERNAL_DISP) ||
-        (usage & GRALLOC_USAGE_PROTECTED) ||
-        (usage & GRALLOC_USAGE_PRIVATE_CP_BUFFER)) {
+        (usage & GRALLOC_USAGE_PROTECTED)) {
             bufferType = BUFFER_TYPE_VIDEO;
     }
     int err;
@@ -253,7 +252,7 @@ int gpu_context_t::alloc_impl(int w, int h, int format, int usage,
     // Create a genlock lock for this buffer handle.
     err = genlock_create_lock((native_handle_t*)(*pHandle));
     if (err) {
-        LOGE("%s: genlock_create_lock failed", __FUNCTION__);
+        ALOGE("%s: genlock_create_lock failed", __FUNCTION__);
         free_impl(reinterpret_cast<private_handle_t*>(pHandle));
         return err;
     }
@@ -269,18 +268,18 @@ int gpu_context_t::free_impl(private_handle_t const* hnd) {
         int index = (hnd->base - m->framebuffer->base) / bufferSize;
         m->bufferMask &= ~(1<<index);
     } else {
-        terminateBuffer(&m->base, const_cast<private_handle_t*>(hnd));
         sp<IMemAlloc> memalloc = mAllocCtrl->getAllocator(hnd->flags);
         int err = memalloc->free_buffer((void*)hnd->base, (size_t) hnd->size,
                 hnd->offset, hnd->fd);
         if(err)
             return err;
+        terminateBuffer(&m->base, const_cast<private_handle_t*>(hnd));
     }
 
     // Release the genlock
     int err = genlock_release_lock((native_handle_t*)hnd);
     if (err) {
-        LOGE("%s: genlock_release_lock failed", __FUNCTION__);
+        ALOGE("%s: genlock_release_lock failed", __FUNCTION__);
     }
 
     delete hnd;

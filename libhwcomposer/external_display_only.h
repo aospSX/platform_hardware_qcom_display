@@ -211,7 +211,7 @@ void inline ExtDispOnly::close() {
 int ExtDispOnly::prepare(hwc_context_t *ctx, hwc_layer_t *layer, int index,
         bool waitForVsync) {
 #if defined (HDMI_DUAL_DISPLAY) && defined (USE_OVERLAY)
-    if(ctx->mHDMIEnabled == EXT_TYPE_NONE ||
+    if(ctx->mHDMIEnabled == EXT_DISPLAY_OFF ||
         ctx->pendingHDMI == true)
         return -1;
 
@@ -268,7 +268,7 @@ inline void ExtDispOnly::startDefaultMirror(hwc_context_t* ctx) {
     framebuffer_device_t *fbDev = hwcModule->fbDevice;
     if (fbDev) {
         //mHDMIEnabled could be HDMI/WFD/NO EXTERNAL
-        fbDev->perform(fbDev, EVENT_EXTERNAL_DISPLAY, ctx->mHDMIEnabled);
+        fbDev->enableHDMIOutput(fbDev, ctx->mHDMIEnabled);
     }
 #endif
 }
@@ -280,7 +280,7 @@ inline void ExtDispOnly::stopDefaultMirror(hwc_context_t* ctx) {
         reinterpret_cast<private_hwc_module_t*>(dev->common.module);
     framebuffer_device_t *fbDev = hwcModule->fbDevice;
     if (fbDev) {
-        fbDev->perform(fbDev, EVENT_EXTERNAL_DISPLAY, EXT_TYPE_NONE);
+        fbDev->enableHDMIOutput(fbDev, EXT_DISPLAY_OFF);
     }
 #endif
 }
@@ -363,7 +363,7 @@ int ExtDispOnly::update(hwc_context_t* ctx, hwc_layer_list_t* list) {
     }
 
     //If External is not connected, dont setup pipes, just return
-    if(ctx->mHDMIEnabled == EXT_TYPE_NONE ||
+    if(ctx->mHDMIEnabled == EXT_DISPLAY_OFF ||
         ctx->pendingHDMI == true) {
         ExtDispOnly::close();
         return -1;
@@ -428,7 +428,7 @@ void ExtDispOnly::storeLockedHandles(hwc_layer_list_t* list) {
 int ExtDispOnly::draw(hwc_context_t *ctx, hwc_layer_list_t *list) {
 #if defined (HDMI_DUAL_DISPLAY) && defined (USE_OVERLAY)
     LOGE_IF(EXTDEBUG, "%s", __func__);
-    if(ctx->mHDMIEnabled == EXT_TYPE_NONE||
+    if(ctx->mHDMIEnabled == EXT_DISPLAY_OFF ||
         ctx->pendingHDMI == true) {
         ExtDispOnly::close();
         return -1;

@@ -34,7 +34,6 @@
 #include "alloc_controller.h"
 #include "memalloc.h"
 #include "ionalloc.h"
-#include "pmemalloc.h"
 #include "ashmemalloc.h"
 #include "gr.h"
 
@@ -65,8 +64,7 @@ static bool canFallback(int compositionType, int usage, bool triedSystem)
         return false;
     if(triedSystem)
         return false;
-    if(usage & (GRALLOC_HEAP_MASK | GRALLOC_USAGE_PROTECTED |
-                GRALLOC_USAGE_PRIVATE_CP_BUFFER))
+    if(usage & (GRALLOC_HEAP_MASK | GRALLOC_USAGE_PROTECTED))
         return false;
     if(usage & (GRALLOC_HEAP_MASK | GRALLOC_USAGE_EXTERNAL_ONLY))
         return false;
@@ -102,7 +100,6 @@ sp<IAllocController> IAllocController::getInstance(bool useMasterHeap)
 }
 
 
-#ifdef USE_ION
 //-------------- IonController-----------------------//
 IonController::IonController()
 {
@@ -117,8 +114,6 @@ int IonController::allocate(alloc_data& data, int usage,
     bool noncontig = false;
 
     data.uncached = useUncached(usage);
-    data.allocType = 0;
-
     if(usage & GRALLOC_USAGE_PRIVATE_UI_CONTIG_HEAP)
         ionFlags |= ION_HEAP(ION_SF_HEAP_ID);
 
@@ -139,13 +134,11 @@ int IonController::allocate(alloc_data& data, int usage,
     if(usage & GRALLOC_USAGE_PRIVATE_CAMERA_HEAP)
         ionFlags |= ION_HEAP(ION_CAMERA_HEAP_ID);
 
-    if(usage & GRALLOC_USAGE_PRIVATE_CP_BUFFER)
+    if(usage & GRALLOC_USAGE_PROTECTED)
         ionFlags |= ION_SECURE;
 
     if(usage & GRALLOC_USAGE_PRIVATE_DO_NOT_MAP)
-        data.allocType  |=  private_handle_t::PRIV_FLAGS_NOT_MAPPED;
-    else
-        data.allocType  &=  ~(private_handle_t::PRIV_FLAGS_NOT_MAPPED);
+        data.allocType  =  private_handle_t::PRIV_FLAGS_NOT_MAPPED;
 
     // if no flags are set, default to
     // SF + IOMMU heaps, so that bypass can work
@@ -156,20 +149,19 @@ int IonController::allocate(alloc_data& data, int usage,
 
     data.flags = ionFlags;
     ret = mIonAlloc->alloc_buffer(data);
-
     // Fallback
     if(ret < 0 && canFallback(compositionType,
                               usage,
                               (ionFlags & ION_SYSTEM_HEAP_ID)))
     {
-        LOGW("Falling back to system heap");
+        ALOGW("Falling back to system heap");
         data.flags = ION_HEAP(ION_SYSTEM_HEAP_ID);
         noncontig = true;
         ret = mIonAlloc->alloc_buffer(data);
     }
 
     if(ret >= 0 ) {
-        data.allocType |= private_handle_t::PRIV_FLAGS_USES_ION;
+        data.allocType = private_handle_t::PRIV_FLAGS_USES_ION;
         if(noncontig)
             data.allocType |= private_handle_t::PRIV_FLAGS_NONCONTIGUOUS_MEM;
         if(ionFlags & ION_SECURE)
@@ -185,13 +177,13 @@ sp<IMemAlloc> IonController::getAllocator(int flags)
     if (flags & private_handle_t::PRIV_FLAGS_USES_ION) {
         memalloc = mIonAlloc;
     } else {
-        LOGE("%s: Invalid flags passed: 0x%x", __FUNCTION__, flags);
+        ALOGE("%s: Invalid flags passed: 0x%x", __FUNCTION__, flags);
     }
 
     return memalloc;
 }
-#endif
 
+#if 0
 //-------------- PmemKernelController-----------------------//
 
 PmemKernelController::PmemKernelController()
@@ -228,7 +220,7 @@ int PmemKernelController::allocate(alloc_data& data, int usage,
                 return ret;
             else {
                 if(adspFallback)
-                    LOGW("Allocation from SMI failed, trying ADSP");
+                    ALOGW("Allocation from SMI failed, trying ADSP");
             }
         }
     }
@@ -245,7 +237,7 @@ sp<IMemAlloc> PmemKernelController::getAllocator(int flags)
     if (flags & private_handle_t::PRIV_FLAGS_USES_PMEM_ADSP)
         memalloc = mPmemAdspAlloc;
     else {
-        LOGE("%s: Invalid flags passed: 0x%x", __FUNCTION__, flags);
+        ALOGE("%s: Invalid flags passed: 0x%x", __FUNCTION__, flags);
         memalloc = NULL;
     }
 
@@ -269,7 +261,6 @@ int PmemAshmemController::allocate(alloc_data& data, int usage,
         int compositionType)
 {
     int ret = 0;
-    data.allocType = 0;
 
     // Make buffers cacheable by default
         data.uncached = false;
@@ -283,7 +274,7 @@ int PmemAshmemController::allocate(alloc_data& data, int usage,
                 GRALLOC_USAGE_PRIVATE_SMI_HEAP)) {
         ret = mPmemKernelCtrl->allocate(data, usage, compositionType);
         if(ret < 0)
-            LOGE("%s: Failed to allocate ADSP/SMI memory", __func__);
+            ALOGE("%s: Failed to allocate ADSP/SMI memory", __func__);
         else
             data.allocType = private_handle_t::PRIV_FLAGS_USES_PMEM_ADSP;
         return ret;
@@ -308,7 +299,7 @@ int PmemAshmemController::allocate(alloc_data& data, int usage,
     if(ret >= 0 ) {
         data.allocType = private_handle_t::PRIV_FLAGS_USES_PMEM;
     } else if(ret < 0 && canFallback(compositionType, usage, false)) {
-        LOGW("Falling back to ashmem");
+        ALOGW("Falling back to ashmem");
         ret = mAshmemAlloc->alloc_buffer(data);
         if(ret >= 0) {
             data.allocType = private_handle_t::PRIV_FLAGS_USES_ASHMEM;
@@ -329,12 +320,13 @@ sp<IMemAlloc> PmemAshmemController::getAllocator(int flags)
     else if (flags & private_handle_t::PRIV_FLAGS_USES_ASHMEM)
         memalloc = mAshmemAlloc;
     else {
-        LOGE("%s: Invalid flags passed: 0x%x", __FUNCTION__, flags);
+        ALOGE("%s: Invalid flags passed: 0x%x", __FUNCTION__, flags);
         memalloc = NULL;
     }
 
     return memalloc;
 }
+#endif
 
 size_t getBufferSizeAndDimensions(int width, int height, int format,
                         int& alignedw, int &alignedh)
@@ -376,7 +368,7 @@ size_t getBufferSizeAndDimensions(int width, int height, int format,
         case HAL_PIXEL_FORMAT_YCrCb_420_SP:
         case HAL_PIXEL_FORMAT_YV12:
             if ((format == HAL_PIXEL_FORMAT_YV12) && ((width&1) || (height&1))) {
-                LOGE("w or h is odd for the YV12 format");
+                ALOGE("w or h is odd for the YV12 format");
                 return -EINVAL;
             }
             alignedw = ALIGN(width, 16);
@@ -393,7 +385,7 @@ size_t getBufferSizeAndDimensions(int width, int height, int format,
             break;
 
         default:
-            LOGE("unrecognized pixel format: %d", format);
+            ALOGE("unrecognized pixel format: %d", format);
             return -EINVAL;
     }
 
@@ -419,7 +411,7 @@ int alloc_buffer(private_handle_t **pHnd, int w, int h, int format, int usage)
 
      int err = sAlloc->allocate(data, allocFlags, 0);
      if (0 != err) {
-         LOGE("%s: allocate failed", __FUNCTION__);
+         ALOGE("%s: allocate failed", __FUNCTION__);
          return -ENOMEM;
      }
 

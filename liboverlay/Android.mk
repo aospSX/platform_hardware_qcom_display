@@ -19,8 +19,9 @@ include $(CLEAR_VARS)
 LOCAL_PRELINK_MODULE := false
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)
 LOCAL_SHARED_LIBRARIES := liblog libcutils libutils libmemalloc
+LOCAL_C_INCLUDES += $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr/include
+LOCAL_ADDITIONAL_DEPENDENCIES += $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr
 LOCAL_C_INCLUDES += hardware/qcom/display/libgralloc
-LOCAL_C_INCLUDES += hardware/qcom/display/libqcomui
 LOCAL_SRC_FILES := \
     overlayLib.cpp \
     overlayLibUI.cpp \
@@ -36,5 +37,7 @@ LOCAL_C_INCLUDES += $(TARGET_OUT_HEADERS)/pp/inc
 LOCAL_ADDITIONAL_DEPENDENCIES += $(TARGET_OUT_INTERMEDIATES)/lib/
 endif
 LOCAL_MODULE := liboverlay
+
+#LGE_CHANGE, for userdebug mode
 LOCAL_MODULE_TAGS := optional
 include $(BUILD_SHARED_LIBRARY)

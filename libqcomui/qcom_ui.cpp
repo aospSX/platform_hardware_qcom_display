@@ -40,6 +40,10 @@
 #include <SkImageEncoder.h>
 #include <Transform.h>
 
+#include <EGL/egl.h>
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+
 using gralloc::IMemAlloc;
 using gralloc::IonController;
 using gralloc::alloc_data;
@@ -60,7 +64,7 @@ namespace {
             sAlloc = gralloc::IAllocController::getInstance(true);
         }
         if (sAlloc == 0) {
-            LOGE("sAlloc is still NULL");
+            ALOGE("sAlloc is still NULL");
             return -EINVAL;
         }
 
@@ -70,7 +74,7 @@ namespace {
         ret = memalloc->free_buffer((void*)hnd->base, hnd->size, hnd->offset, hnd->fd);
 
         if (ret) {
-            LOGE("%s: free_buffer failed", __FUNCTION__);
+            ALOGE("%s: free_buffer failed", __FUNCTION__);
             return -1;
         }
 
@@ -98,7 +102,7 @@ namespace {
             hnd->offset = data.offset;
             hnd->size = data.size;
         } else {
-            LOGE("%s: allocate failed", __FUNCTION__);
+            ALOGE("%s: allocate failed", __FUNCTION__);
             return -EINVAL;
         }
 #endif
@@ -122,7 +126,7 @@ int getNumberOfArgsForOperation(int operation) {
         case  NATIVE_WINDOW_UPDATE_BUFFERS_GEOMETRY:
             num_args = 3;
             break;
-        default: LOGE("%s: invalid operation(0x%x)", __FUNCTION__, operation);
+        default: ALOGE("%s: invalid operation(0x%x)", __FUNCTION__, operation);
             break;
     };
     return num_args;
@@ -150,6 +154,33 @@ bool isGPUSupportedFormat(int format) {
     return true;
 }
 
+/* decide the texture target dynamically, based on the pixel format*/
+
+int decideTextureTarget(int pixel_format)
+{
+
+  // Default the return value to GL_TEXTURE_EXTERAL_OES
+  int retVal = GL_TEXTURE_EXTERNAL_OES;
+
+  // Change texture target to TEXTURE_2D for RGB formats
+  switch (pixel_format) {
+
+     case HAL_PIXEL_FORMAT_RGBA_8888:
+     case HAL_PIXEL_FORMAT_RGBX_8888:
+     case HAL_PIXEL_FORMAT_RGB_888:
+     case HAL_PIXEL_FORMAT_RGB_565:
+     case HAL_PIXEL_FORMAT_BGRA_8888:
+     case HAL_PIXEL_FORMAT_RGBA_5551:
+     case HAL_PIXEL_FORMAT_RGBA_4444:
+          retVal = GL_TEXTURE_2D;
+          break;
+     default:
+          retVal = GL_TEXTURE_EXTERNAL_OES;
+          break;
+  }
+  return retVal;
+}
+
 /*
  * Function to check if the allocated buffer is of the correct size.
  * Reallocate the buffer with the correct size, if the size doesn't
@@ -170,7 +201,7 @@ int checkBuffer(native_handle_t *buffer_handle, int size, int usage)
 
     // Validate the handle
     if (private_handle_t::validate(buffer_handle)) {
-        LOGE("%s: handle is invalid", __FUNCTION__);
+        ALOGE("%s: handle is invalid", __FUNCTION__);
         return -EINVAL;
     }
 
@@ -222,7 +253,7 @@ bool needNewBuffer(const qBufGeometry currentGeometry,
 int updateBufferGeometry(sp<GraphicBuffer> buffer, const qBufGeometry updatedGeometry)
 {
     if (buffer == 0) {
-        LOGE("%s: graphic buffer is NULL", __FUNCTION__);
+        ALOGE("%s: graphic buffer is NULL", __FUNCTION__);
         return -EINVAL;
     }
 
@@ -240,7 +271,7 @@ int updateBufferGeometry(sp<GraphicBuffer> buffer, const qBufGeometry updatedGeo
 
     // Validate the handle
     if (private_handle_t::validate(buffer->handle)) {
-        LOGE("%s: handle is invalid", __FUNCTION__);
+        ALOGE("%s: handle is invalid", __FUNCTION__);
         return -EINVAL;
     }
     buffer->width  = updatedGeometry.width;
@@ -252,7 +283,7 @@ int updateBufferGeometry(sp<GraphicBuffer> buffer, const qBufGeometry updatedGeo
         hnd->height = updatedGeometry.height;
         hnd->format = updatedGeometry.format;
     } else {
-        LOGE("%s: hnd is NULL", __FUNCTION__);
+        ALOGE("%s: hnd is NULL", __FUNCTION__);
         return -EINVAL;
     }
 
@@ -267,7 +298,7 @@ int updateBufferGeometry(sp<GraphicBuffer> buffer, const qBufGeometry updatedGeo
 int updateBufferS3DFormat(sp<GraphicBuffer> buffer, const int s3dFormat)
 {
     if (buffer == 0) {
-        LOGE("%s: graphic buffer is NULL", __FUNCTION__);
+        ALOGE("%s: graphic buffer is NULL", __FUNCTION__);
         return -EINVAL;
     }
 
@@ -298,7 +329,7 @@ int updateLayerQcomFlags(eLayerAttrib attribute, bool enable, int& currentFlags)
             else
                 currentFlags &= ~LAYER_ASYNCHRONOUS;
         } break;
-        default: LOGE("%s: invalid attribute(0x%x)", __FUNCTION__, attribute);
+        default: ALOGE("%s: invalid attribute(0x%x)", __FUNCTION__, attribute);
                  break;
     }
     return ret;
@@ -342,7 +373,7 @@ bool isUpdatingFB(HWCCompositionType compositionType)
         case HWC_USE_COPYBIT:
             return true;
         default:
-            LOGE("%s: invalid composition type(%d)", __FUNCTION__, compositionType);
+            ALOGE("%s: invalid composition type(%d)", __FUNCTION__, compositionType);
             return false;
     };
 }
@@ -389,6 +420,7 @@ int getCompositionType() {
  */
 int qcomuiClearRegion(Region region, EGLDisplay dpy, EGLSurface sur)
 {
+#if 0 /* FIXME DIE */
     int ret = 0;
 
     if (-1 == sCompositionType) {
@@ -397,7 +429,6 @@ int qcomuiClearRegion(Region region, EGLDisplay dpy, EGLSurface sur)
 
     if ((COMPOSITION_TYPE_MDP != sCompositionType) &&
         (COMPOSITION_TYPE_C2D != sCompositionType) &&
-        (COMPOSITION_TYPE_DYN != sCompositionType) &&
         (COMPOSITION_TYPE_CPU != sCompositionType)) {
         // For non CPU/C2D/MDP composition, return an error, so that SF can use
         // the GPU to draw the wormhole.
@@ -407,13 +438,13 @@ int qcomuiClearRegion(Region region, EGLDisplay dpy, EGLSurface sur)
     android_native_buffer_t *renderBuffer = (android_native_buffer_t *)
                                         eglGetRenderBufferANDROID(dpy, sur);
     if (!renderBuffer) {
-        LOGE("%s: eglGetRenderBufferANDROID returned NULL buffer",
+        ALOGE("%s: eglGetRenderBufferANDROID returned NULL buffer",
             __FUNCTION__);
             return -1;
     }
     private_handle_t *fbHandle = (private_handle_t *)renderBuffer->handle;
     if(!fbHandle) {
-        LOGE("%s: Framebuffer handle is NULL", __FUNCTION__);
+        ALOGE("%s: Framebuffer handle is NULL", __FUNCTION__);
         return -1;
     }
 
@@ -439,45 +470,42 @@ int qcomuiClearRegion(Region region, EGLDisplay dpy, EGLSurface sur)
             dst += stride;
         } while(--h);
     }
+#endif
     return 0;
 }
 
 /*
  * Handles the externalDisplay event
  * HDMI has highest priority compared to WifiDisplay
- * Based on the current and the new display type, decides the
+ * Based on the current and the new display event, decides the
  * external display to be enabled
  *
- * @param: disp - external display type(wfd/hdmi)
- * @param: value - external event(0/1)
- * @param: currdispType - Current enabled external display Type
- * @return: external display type to be enabled
+ * @param: newEvent - new external event
+ * @param: currEvent - currently enabled external event
+ * @return: external display to be enabled
  *
  */
-external_display_type handleEventHDMI(external_display_type disp, int value,
-                                       external_display_type currDispType)
+external_display handleEventHDMI(external_display newState, external_display
+                                                                   currState)
 {
-    external_display_type retDispType = currDispType;
-    switch(disp) {
-        case EXT_TYPE_HDMI:
-            if(value)
-                retDispType = EXT_TYPE_HDMI;
-            else
-                retDispType = EXT_TYPE_NONE;
+    external_display retState = currState;
+    switch(newState) {
+        case EXT_DISPLAY_HDMI:
+            retState = EXT_DISPLAY_HDMI;
             break;
-        case EXT_TYPE_WIFI:
-            if(currDispType != EXT_TYPE_HDMI) {
-                if(value)
-                    retDispType = EXT_TYPE_WIFI;
-                else
-                    retDispType = EXT_TYPE_NONE;
+        case EXT_DISPLAY_WIFI:
+            if(currState != EXT_DISPLAY_HDMI) {
+                retState = EXT_DISPLAY_WIFI;
             }
             break;
+        case EXT_DISPLAY_OFF:
+            retState = EXT_DISPLAY_OFF;
+            break;
         default:
-            LOGE("%s: Unknown External Display Type!!");
+            ALOGE("handleEventHDMI: unknown Event");
             break;
     }
-    return retDispType;
+    return retState;
 }
 
 // Using global variables for layer dumping since "property_set("debug.sf.dump",
@@ -519,7 +547,7 @@ bool needToDumpLayers()
             if (0 == mkdir(sfdumpdir_png, 0777))
                 sfdump_counter_png = 0;
             else
-                LOGE("sfdump: Error: %s. Failed to create sfdump directory"
+                ALOGE("sfdump: Error: %s. Failed to create sfdump directory"
                 ": %s", strerror(errno), sfdumpdir_png);
         }
     }
@@ -545,7 +573,7 @@ bool needToDumpLayers()
             if (0 == mkdir(sfdumpdir_raw, 0777))
                 sfdump_counter_raw = 0;
             else
-                LOGE("sfdump: Error: %s. Failed to create sfdump directory"
+                ALOGE("sfdump: Error: %s. Failed to create sfdump directory"
                 ": %s", strerror(errno), sfdumpdir_raw);
         }
     }
@@ -640,7 +668,7 @@ void dumpLayer(int moduleCompositionType, int listFlags, size_t layerIndex,
                                     sfdump_counter_raw, sfdump_countlimit_raw);
     }
     if (NULL == hwLayers) {
-        LOGE("sfdump: Error.%s%sLayer[%d] No hwLayers to dump.",
+        ALOGE("sfdump: Error.%s%sLayer[%d] No hwLayers to dump.",
                                 dumplogstr_raw, dumplogstr_png, layerIndex);
         return;
     }
@@ -649,12 +677,11 @@ void dumpLayer(int moduleCompositionType, int listFlags, size_t layerIndex,
     hwc_rect_t displayFrame = layer->displayFrame;
     private_handle_t *hnd = (private_handle_t *)layer->handle;
     char pixelformatstr[32] = "None";
-    uint32_t transform = layer->transform & FINAL_TRANSFORM_MASK;
 
     if (hnd)
         getHalPixelFormatStr(hnd->format, pixelformatstr);
-
-    LOGE("sfdump: %s%s[%s]-Composition, Layer[%d] SrcBuff[%dx%d] "
+#if 0
+    ALOGE("sfdump: %s%s[%s]-Composition, Layer[%d] SrcBuff[%dx%d] "
         "SrcCrop[%dl, %dt, %dr, %db] "
         "DispFrame[%dl, %dt, %dr, %db] Composition-type = %s, Format = %s, "
         "Orientation = %s, Flags = %s%s%s%s%s%s%s%s%s%s",
@@ -674,13 +701,13 @@ void dumpLayer(int moduleCompositionType, int listFlags, size_t layerIndex,
         (layer->compositionType == HWC_OVERLAY)? "Overlay":
         (layer->compositionType == HWC_USE_COPYBIT)? "Copybit": "???",
         pixelformatstr,
-        (transform == Transform::ROT_0)? "ROT_0":
-        (transform == Transform::FLIP_H)? "FLIP_H":
-        (transform == Transform::FLIP_V)? "FLIP_V":
-        (transform == Transform::ROT_90)? "ROT_90":
-        (transform == Transform::ROT_180)? "ROT_180":
-        (transform == Transform::ROT_270)? "ROT_270":
-        (transform == Transform::ROT_INVALID)? "ROT_INVALID":"???",
+        (layer->transform == Transform::ROT_0)? "ROT_0":
+        (layer->transform == Transform::FLIP_H)? "FLIP_H":
+        (layer->transform == Transform::FLIP_V)? "FLIP_V":
+        (layer->transform == Transform::ROT_90)? "ROT_90":
+        (layer->transform == Transform::ROT_180)? "ROT_180":
+        (layer->transform == Transform::ROT_270)? "ROT_270":
+        (layer->transform == Transform::ROT_INVALID)? "ROT_INVALID":"???",
         (layer->flags == 0)? "[None]":"",
         (layer->flags & HWC_SKIP_LAYER)? "[Skip layer]":"",
         (layer->flags & HWC_LAYER_NOT_UPDATING)? "[Layer not updating]":"",
@@ -691,9 +718,9 @@ void dumpLayer(int moduleCompositionType, int listFlags, size_t layerIndex,
         (layer->flags & HWC_BYPASS_RESERVE_1)? "[Bypass Reserve 1]":"",
         (listFlags & HWC_GEOMETRY_CHANGED)? "[List: Geometry Changed]":"",
         (listFlags & HWC_SKIP_COMPOSITION)? "[List: Skip Composition]":"");
-
+#endif
         if (NULL == hnd) {
-            LOGE("sfdump: %s%sLayer[%d] private-handle is invalid.",
+            ALOGE("sfdump: %s%sLayer[%d] private-handle is invalid.",
                                 dumplogstr_raw, dumplogstr_png, layerIndex);
             return;
         }
@@ -727,11 +754,11 @@ void dumpLayer(int moduleCompositionType, int listFlags, size_t layerIndex,
                 tempSkBmp->setPixels((void*)hnd->base);
                 bResult = SkImageEncoder::EncodeFile(sfdumpfile_name,
                                 *tempSkBmp, SkImageEncoder::kPNG_Type, 100);
-                LOGE("sfdump: %sDumped Layer[%d] to %s: %s", dumplogstr_png,
+                ALOGE("sfdump: %sDumped Layer[%d] to %s: %s", dumplogstr_png,
                     layerIndex, sfdumpfile_name, bResult ? "Success" : "Fail");
             }
             else {
-                LOGE("sfdump: %sSkipping Layer[%d] dump: Unsupported layer "
+                ALOGE("sfdump: %sSkipping Layer[%d] dump: Unsupported layer "
                     "format %s for png encoder.", dumplogstr_png, layerIndex,
                                             pixelformatstr);
             }
@@ -750,8 +777,161 @@ void dumpLayer(int moduleCompositionType, int listFlags, size_t layerIndex,
                 bResult = (bool) fwrite((void*)hnd->base, hnd->size, 1, fp);
                 fclose(fp);
             }
-            LOGE("sfdump: %s Dumped Layer[%d] to %s: %s", dumplogstr_raw,
+            ALOGE("sfdump: %s Dumped Layer[%d] to %s: %s", dumplogstr_raw,
                 layerIndex, sfdumpfile_name, bResult ? "Success" : "Fail");
         }
 }
 
+#ifdef DEBUG_CALC_FPS
+ANDROID_SINGLETON_STATIC_INSTANCE(CalcFps) ;
+
+CalcFps::CalcFps() {
+    debug_fps_level = 0;
+    Init();
+}
+
+CalcFps::~CalcFps() {
+}
+
+void CalcFps::Init() {
+    char prop[PROPERTY_VALUE_MAX];
+    property_get("debug.gr.calcfps", prop, "0");
+    debug_fps_level = atoi(prop);
+    if (debug_fps_level > MAX_DEBUG_FPS_LEVEL) {
+        ALOGW("out of range value for debug.gr.calcfps, using 0");
+        debug_fps_level = 0;
+    }
+
+    ALOGE("DEBUG_CALC_FPS: %d", debug_fps_level);
+    populate_debug_fps_metadata();
+}
+
+void CalcFps::Fps() {
+    if (debug_fps_level > 0)
+        calc_fps(ns2us(systemTime()));
+}
+
+void CalcFps::populate_debug_fps_metadata(void)
+{
+    char prop[PROPERTY_VALUE_MAX];
+
+    /*defaults calculation of fps to based on number of frames*/
+    property_get("debug.gr.calcfps.type", prop, "0");
+    debug_fps_metadata.type = (debug_fps_metadata_t::DfmType) atoi(prop);
+
+    /*defaults to 1000ms*/
+    property_get("debug.gr.calcfps.timeperiod", prop, "1000");
+    debug_fps_metadata.time_period = atoi(prop);
+
+    property_get("debug.gr.calcfps.period", prop, "10");
+    debug_fps_metadata.period = atoi(prop);
+
+    if (debug_fps_metadata.period > MAX_FPS_CALC_PERIOD_IN_FRAMES) {
+        debug_fps_metadata.period = MAX_FPS_CALC_PERIOD_IN_FRAMES;
+    }
+
+    /* default ignorethresh_us: 500 milli seconds */
+    property_get("debug.gr.calcfps.ignorethresh_us", prop, "500000");
+    debug_fps_metadata.ignorethresh_us = atoi(prop);
+
+    debug_fps_metadata.framearrival_steps =
+                       (debug_fps_metadata.ignorethresh_us / 16666);
+
+    if (debug_fps_metadata.framearrival_steps > MAX_FRAMEARRIVAL_STEPS) {
+        debug_fps_metadata.framearrival_steps = MAX_FRAMEARRIVAL_STEPS;
+        debug_fps_metadata.ignorethresh_us =
+                        debug_fps_metadata.framearrival_steps * 16666;
+    }
+
+    /* 2ms margin of error for the gettimeofday */
+    debug_fps_metadata.margin_us = 2000;
+
+    for (unsigned int i = 0; i < MAX_FRAMEARRIVAL_STEPS; i++)
+        debug_fps_metadata.accum_framearrivals[i] = 0;
+
+    ALOGE("period: %d", debug_fps_metadata.period);
+    ALOGE("ignorethresh_us: %lld", debug_fps_metadata.ignorethresh_us);
+}
+
+void CalcFps::print_fps(float fps)
+{
+    if (debug_fps_metadata_t::DFM_FRAMES == debug_fps_metadata.type)
+        ALOGE("FPS for last %d frames: %3.2f", debug_fps_metadata.period, fps);
+    else
+        ALOGE("FPS for last (%f ms, %d frames): %3.2f",
+             debug_fps_metadata.time_elapsed,
+             debug_fps_metadata.curr_frame, fps);
+
+    debug_fps_metadata.curr_frame = 0;
+    debug_fps_metadata.time_elapsed = 0.0;
+
+    if (debug_fps_level > 1) {
+        ALOGE("Frame Arrival Distribution:");
+        for (unsigned int i = 0;
+             i < ((debug_fps_metadata.framearrival_steps / 6) + 1);
+             i++) {
+            ALOGE("%lld %lld %lld %lld %lld %lld",
+                 debug_fps_metadata.accum_framearrivals[i*6],
+                 debug_fps_metadata.accum_framearrivals[i*6+1],
+                 debug_fps_metadata.accum_framearrivals[i*6+2],
+                 debug_fps_metadata.accum_framearrivals[i*6+3],
+                 debug_fps_metadata.accum_framearrivals[i*6+4],
+                 debug_fps_metadata.accum_framearrivals[i*6+5]);
+        }
+
+        /* We are done with displaying, now clear the stats */
+        for (unsigned int i = 0;
+             i < debug_fps_metadata.framearrival_steps;
+             i++)
+            debug_fps_metadata.accum_framearrivals[i] = 0;
+    }
+    return;
+}
+
+void CalcFps::calc_fps(nsecs_t currtime_us)
+{
+    static nsecs_t oldtime_us = 0;
+
+    nsecs_t diff = currtime_us - oldtime_us;
+
+    oldtime_us = currtime_us;
+
+    if (debug_fps_metadata_t::DFM_FRAMES == debug_fps_metadata.type &&
+        diff > debug_fps_metadata.ignorethresh_us) {
+        return;
+    }
+
+    if (debug_fps_metadata.curr_frame < MAX_FPS_CALC_PERIOD_IN_FRAMES) {
+        debug_fps_metadata.framearrivals[debug_fps_metadata.curr_frame] = diff;
+    }
+
+    debug_fps_metadata.curr_frame++;
+
+    if (debug_fps_level > 1) {
+        unsigned int currstep = (diff + debug_fps_metadata.margin_us) / 16666;
+
+        if (currstep < debug_fps_metadata.framearrival_steps) {
+            debug_fps_metadata.accum_framearrivals[currstep-1]++;
+        }
+    }
+
+    if (debug_fps_metadata_t::DFM_FRAMES == debug_fps_metadata.type) {
+        if (debug_fps_metadata.curr_frame == debug_fps_metadata.period) {
+            /* time to calculate and display FPS */
+            nsecs_t sum = 0;
+            for (unsigned int i = 0; i < debug_fps_metadata.period; i++)
+                sum += debug_fps_metadata.framearrivals[i];
+            print_fps((debug_fps_metadata.period * float(1000000))/float(sum));
+        }
+    }
+    else if (debug_fps_metadata_t::DFM_TIME == debug_fps_metadata.type) {
+        debug_fps_metadata.time_elapsed += ((float)diff/1000.0);
+        if (debug_fps_metadata.time_elapsed >= debug_fps_metadata.time_period) {
+            float fps = (1000.0 * debug_fps_metadata.curr_frame)/
+                        (float)debug_fps_metadata.time_elapsed;
+            print_fps(fps);
+        }
+    }
+    return;
+}
+#endif

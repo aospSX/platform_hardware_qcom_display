@@ -33,6 +33,7 @@
 #include <cutils/native_handle.h>
 #include <ui/GraphicBuffer.h>
 #include <hardware/hwcomposer.h>
+#include <hardware/hwcomposer_defs.h>
 #include <ui/Region.h>
 #include <EGL/egl.h>
 #include <utils/Singleton.h>
@@ -80,13 +81,6 @@ enum {
 };
 
 /*
- * Layer Transformation - refers to Layer::setGeometry()
- */
-#define SHIFT_SRC_TRANSFORM  4
-#define SRC_TRANSFORM_MASK   0x00F0
-#define FINAL_TRANSFORM_MASK 0x000F
-
-/*
  * Flags set by the layer and sent to HWC
  */
 enum {
@@ -107,37 +101,12 @@ enum HWCCompositionType {
     HWC_USE_COPYBIT                // This layer is to be handled by copybit
 };
 
-enum external_display_type {
-    EXT_TYPE_NONE,
-    EXT_TYPE_HDMI,
-    EXT_TYPE_WIFI
+enum external_display {
+    EXT_DISPLAY_OFF,
+    EXT_DISPLAY_HDMI,
+    EXT_DISPLAY_WIFI
 };
 
-/* Events to the Display HAL perform function
-   As of now used for external display related such as
-   connect, disconnect, orientation, video started etc.,
-*/
-enum {
-    EVENT_EXTERNAL_DISPLAY,     // External display on/off Event
-    EVENT_VIDEO_OVERLAY,        // Video Overlay start/stop Event
-    EVENT_ORIENTATION_CHANGE,   // Orientation Change Event
-    EVENT_OVERLAY_STATE_CHANGE, // Overlay State Change Event
-    EVENT_OPEN_SECURE_START,    // Start of secure session setup config by stagefright
-    EVENT_OPEN_SECURE_END,      // End of secure session setup config by stagefright
-    EVENT_CLOSE_SECURE_START,   // Start of secure session teardown config
-    EVENT_CLOSE_SECURE_END,     // End of secure session teardown config
-    EVENT_RESET_POSTBUFFER,     // Reset post framebuffer mutex
-    EVENT_WAIT_POSTBUFFER,      // Wait until post framebuffer returns
-    EVENT_FORCE_COMPOSITION,    // On/Off event for avoiding skip composition
-};
-
-// Video information sent to framebuffer HAl
-// used for handling UI mirroring.
-enum {
-    VIDEO_OVERLAY_ENDED = 0,
-    VIDEO_2D_OVERLAY_STARTED,
-    VIDEO_3D_OVERLAY_STARTED
-};
 /*
  * Structure to hold the buffer geometry
  */
@@ -152,6 +121,75 @@ struct qBufGeometry {
     }
 };
 
+#ifndef DEBUG_CALC_FPS
+#define CALC_FPS() ((void)0)
+#define CALC_INIT() ((void)0)
+#else
+#define CALC_FPS() CalcFps::getInstance().Fps()
+#define CALC_INIT() CalcFps::getInstance().Init()
+
+class CalcFps : public Singleton<CalcFps> {
+public:
+    CalcFps();
+    ~CalcFps();
+
+    void Init();
+    void Fps();
+
+private:
+    static const unsigned int MAX_FPS_CALC_PERIOD_IN_FRAMES = 128;
+    static const unsigned int MAX_FRAMEARRIVAL_STEPS = 50;
+    static const unsigned int MAX_DEBUG_FPS_LEVEL = 2;
+
+    struct debug_fps_metadata_t {
+        /*fps calculation based on time or number of frames*/
+        enum DfmType {
+          DFM_FRAMES = 0,
+          DFM_TIME   = 1,
+        };
+
+        DfmType type;
+
+        /* indicates how much time do we wait till we calculate FPS */
+        unsigned long time_period;
+
+        /*indicates how much time elapsed since we report fps*/
+        float time_elapsed;
+
+        /* indicates how many frames do we wait till we calculate FPS */
+        unsigned int period;
+        /* current frame, will go upto period, and then reset */
+        unsigned int curr_frame;
+        /* frame will arrive at a multiple of 16666 us at the display.
+           This indicates how many steps to consider for our calculations.
+           For example, if framearrival_steps = 10, then the frame that arrived
+           after 166660 us or more will be ignored.
+        */
+        unsigned int framearrival_steps;
+        /* ignorethresh_us = framearrival_steps * 16666 */
+        nsecs_t      ignorethresh_us;
+        /* used to calculate the actual frame arrival step, the times might not be
+           accurate
+        */
+        unsigned int margin_us;
+
+        /* actual data storage */
+        nsecs_t      framearrivals[MAX_FPS_CALC_PERIOD_IN_FRAMES];
+        nsecs_t      accum_framearrivals[MAX_FRAMEARRIVAL_STEPS];
+    };
+
+private:
+    void populate_debug_fps_metadata(void);
+    void print_fps(float fps);
+    void calc_fps(nsecs_t currtime_us);
+
+private:
+    debug_fps_metadata_t debug_fps_metadata;
+    unsigned int debug_fps_level;
+};
+#endif
+
+#if 0
 class QCBaseLayer
 {
 //    int mS3DFormat;
@@ -180,6 +218,7 @@ public:
     }
     int32_t needsS3DCompose () const { return mComposeS3DFormat; }
 };
+#endif
 
 /*
  * Function to check if the allocated buffer is of the correct size.
@@ -203,6 +242,21 @@ int checkBuffer(native_handle_t *buffer_handle, int size, int usage);
  */
 bool isGPUSupportedFormat(int format);
 
+/*
+ * Adreno is not optimized for GL_TEXTURE_EXTERNAL_OES
+ * texure target. DO NOT choose TEXTURE_EXTERNAL_OES
+ * target for RGB formats.
+ *
+ * Based on the pixel format, decide the texture target.
+ *
+ * @param : pixel format to check
+ *
+ * @return : GL_TEXTURE_2D for RGB formats, and
+ *           GL_TEXTURE_EXTERNAL_OES for YUV formats.
+ *
+*/
+
+int decideTextureTarget (const int pixel_format);
 
 /*
  * Gets the number of arguments required for this operation.
@@ -301,8 +355,9 @@ int qcomuiClearRegion(Region region, EGLDisplay dpy, EGLSurface sur);
  * @return: external display to be enabled
  *
  */
-external_display_type handleEventHDMI(external_display_type disp, int value,
-                                      external_display_type currDispType);
+external_display handleEventHDMI(external_display newEvent, external_display
+                                                                   currEvent);
+
 /*
  * Checks if layers need to be dumped based on system property "debug.sf.dump"
  * for raw dumps and "debug.sf.dump.png" for png dumps.

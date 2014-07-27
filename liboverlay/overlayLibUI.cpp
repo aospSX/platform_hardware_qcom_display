@@ -75,6 +75,16 @@ int getRGBBpp(int format) {
     return ret;
 }
 
+bool turnOFFVSync() {
+    static int swapIntervalPropVal = -1;
+    if (swapIntervalPropVal == -1) {
+        char pval[PROPERTY_VALUE_MAX];
+        property_get("debug.gr.swapinterval", pval, "1");
+        swapIntervalPropVal = atoi(pval);
+    }
+    return (swapIntervalPropVal == 0);
+}
+
 };
 
 namespace overlay {
@@ -110,10 +120,8 @@ status_t Display::openDisplay(int fbnum) {
 }
 
 void Display::closeDisplay() {
-    if(mFD > 0) {
-        close(mFD);
-        mFD = NO_INIT;
-    }
+    close(mFD);
+    mFD = NO_INIT;
 }
 
 Rotator::Rotator() : mFD(NO_INIT), mSessionID(NO_INIT), mPmemFD(NO_INIT)
@@ -266,9 +274,8 @@ void OverlayUI::setDisplayParams(int fbNum, bool waitForVsync, bool isFg, int
     else
         flags &= ~MDP_OV_PIPE_SHARE;
 
-    //MDP needs this information to set up pixel repeat
-    //for VG pipes when upscaling
-    flags |= MDP_BACKEND_COMPOSITION;
+    if (turnOFFVSync())
+        flags |= MDP_OV_PLAY_NOWAIT;
 
     mParamsChanged |= (mFBNum ^ fbNum) ||
                       (mOvInfo.is_fg ^ isFg) ||
@@ -316,6 +323,8 @@ void OverlayUI::setupOvRotInfo() {
     mOvInfo.src.width = srcw;
     mOvInfo.src.height = srch;
     mOvInfo.src.format = format;
+    mOvInfo.src_rect.w = w;
+    mOvInfo.src_rect.h = h;
     mOvInfo.alpha = 0xff;
     mOvInfo.transp_mask = 0xffffffff;
     mRotInfo.src.format = format;
@@ -427,17 +436,13 @@ status_t OverlayUI::startOVSession() {
 status_t OverlayUI::closeOVSession() {
     status_t ret = NO_ERROR;
     int err = 0;
-
-    if (mSessionID == NO_INIT) {
-        mobjDisplay.closeDisplay();
-        LOGE("%s : session is not initialized", __FUNCTION__);
-        return ret;
-    }
     if(err = ioctl(mobjDisplay.getFD(), MSMFB_OVERLAY_UNSET, &mSessionID)) {
-        LOGW("%s: MSMFB_OVERLAY_UNSET failed. (%d)", __FUNCTION__, err);
+        LOGE("%s: MSMFB_OVERLAY_UNSET failed. (%d)", __FUNCTION__, err);
+        ret = BAD_VALUE;
+    } else {
+        mobjDisplay.closeDisplay();
+        mSessionID = NO_INIT;
     }
-    mobjDisplay.closeDisplay();
-    mSessionID = NO_INIT;
     return ret;
 }
 
@@ -446,11 +451,6 @@ status_t OverlayUI::queueBuffer(buffer_handle_t buffer) {
 
     if (mChannelState != UP)
         return ret;
-
-    if (mSessionID == NO_INIT) {
-        LOGE("%s : session is not inited", __FUNCTION__);
-        return BAD_VALUE;
-    }
 
     msmfb_overlay_data ovData;
     memset(&ovData, 0, sizeof(ovData));

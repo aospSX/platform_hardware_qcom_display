@@ -70,20 +70,20 @@ static int gralloc_map(gralloc_module_t const* module,
         int err = memalloc->map_buffer(&mappedAddress, size,
                 hnd->offset, hnd->fd);
         if(err) {
-            LOGE("Could not mmap handle %p, fd=%d (%s)",
+            ALOGE("Could not mmap handle %p, fd=%d (%s)",
                     handle, hnd->fd, strerror(errno));
             hnd->base = 0;
             return -errno;
         }
 
         if (mappedAddress == MAP_FAILED) {
-            LOGE("Could not mmap handle %p, fd=%d (%s)",
+            ALOGE("Could not mmap handle %p, fd=%d (%s)",
                     handle, hnd->fd, strerror(errno));
             hnd->base = 0;
             return -errno;
         }
         hnd->base = intptr_t(mappedAddress) + hnd->offset;
-        //LOGD("gralloc_map() succeeded fd=%d, off=%d, size=%d, vaddr=%p",
+        //ALOGD("gralloc_map() succeeded fd=%d, off=%d, size=%d, vaddr=%p",
         //        hnd->fd, hnd->offset, hnd->size, mappedAddress);
     }
     *vaddr = (void*)hnd->base;
@@ -102,7 +102,7 @@ static int gralloc_unmap(gralloc_module_t const* module,
         if(memalloc != NULL)
             err = memalloc->unmap_buffer(base, size, hnd->offset);
         if (err) {
-            LOGE("Could not unmap memory at address %p", base);
+            ALOGE("Could not unmap memory at address %p", base);
         }
     }
     hnd->base = 0;
@@ -137,7 +137,7 @@ int gralloc_register_buffer(gralloc_module_t const* module,
         void *vaddr;
         int err = gralloc_map(module, handle, &vaddr);
         if (err) {
-            LOGE("%s: gralloc_map failed", __FUNCTION__);
+            ALOGE("%s: gralloc_map failed", __FUNCTION__);
             return err;
         }
 
@@ -146,7 +146,7 @@ int gralloc_register_buffer(gralloc_module_t const* module,
 
         // Check if there is a valid lock attached to the handle.
         if (-1 == hnd->genlockHandle) {
-            LOGE("%s: the lock is invalid.", __FUNCTION__);
+            ALOGE("%s: the lock is invalid.", __FUNCTION__);
             gralloc_unmap(module, handle);
             hnd->base = 0;
             return -EINVAL;
@@ -154,7 +154,7 @@ int gralloc_register_buffer(gralloc_module_t const* module,
 
         // Attach the genlock handle
         if (GENLOCK_NO_ERROR != genlock_attach_lock((native_handle_t *)handle)) {
-            LOGE("%s: genlock_attach_lock failed", __FUNCTION__);
+            ALOGE("%s: genlock_attach_lock failed", __FUNCTION__);
             gralloc_unmap(module, handle);
             hnd->base = 0;
             return -EINVAL;
@@ -187,7 +187,7 @@ int gralloc_unregister_buffer(gralloc_module_t const* module,
         if (-1 != hnd->genlockHandle) {
             return genlock_release_lock((native_handle_t *)handle);
         } else {
-            LOGE("%s: there was no genlock attached to this buffer", __FUNCTION__);
+            ALOGE("%s: there was no genlock attached to this buffer", __FUNCTION__);
             return -EINVAL;
         }
     }
@@ -215,7 +215,7 @@ int terminateBuffer(gralloc_module_t const* module,
                 gralloc_unmap(module, hnd);
             }
         } else {
-            LOGE("terminateBuffer: unmapping a non pmem/ashmem buffer flags = 0x%x", hnd->flags);
+            ALOGE("terminateBuffer: unmapping a non pmem/ashmem buffer flags = 0x%x", hnd->flags);
             gralloc_unmap(module, hnd);
         }
     }
@@ -256,7 +256,7 @@ int gralloc_lock(gralloc_module_t const* module,
         if (GENLOCK_NO_ERROR != genlock_lock_buffer((native_handle_t *)handle,
                                                    (genlock_lock_type)lockType,
                                                    timeout)) {
-            LOGE("%s: genlock_lock_buffer (lockType=0x%x) failed", __FUNCTION__,
+            ALOGE("%s: genlock_lock_buffer (lockType=0x%x) failed", __FUNCTION__,
                 lockType);
             return -EINVAL;
         } else {
@@ -286,7 +286,7 @@ int gralloc_unlock(gralloc_module_t const* module,
         sp<IMemAlloc> memalloc = getAllocator(hnd->flags) ;
         err = memalloc->clean_buffer((void*)hnd->base,
                 hnd->size, hnd->offset, hnd->fd);
-        LOGE_IF(err < 0, "cannot flush handle %p (offs=%x len=%x, flags = 0x%x) err=%s\n",
+        ALOGE_IF(err < 0, "cannot flush handle %p (offs=%x len=%x, flags = 0x%x) err=%s\n",
                 hnd, hnd->offset, hnd->size, hnd->flags, strerror(errno));
         hnd->flags &= ~private_handle_t::PRIV_FLAGS_NEEDS_FLUSH;
     }
@@ -294,7 +294,7 @@ int gralloc_unlock(gralloc_module_t const* module,
     if ((hnd->flags & private_handle_t::PRIV_FLAGS_SW_LOCK)) {
         // Unlock the buffer.
         if (GENLOCK_NO_ERROR != genlock_unlock_buffer((native_handle_t *)handle)) {
-            LOGE("%s: genlock_unlock_buffer failed", __FUNCTION__);
+            ALOGE("%s: genlock_unlock_buffer failed", __FUNCTION__);
             return -EINVAL;
         } else
             hnd->flags &= ~private_handle_t::PRIV_FLAGS_SW_LOCK;

@@ -49,7 +49,6 @@
 #include <cutils/properties.h>
 #endif
 
-#include <utils/profiler.h>
 #include <qcom_ui.h>
 
 #define FB_DEBUG 0
@@ -101,7 +100,7 @@ static int fb_setSwapInterval(struct framebuffer_device_t* dev,
             int interval)
 {
     char pval[PROPERTY_VALUE_MAX];
-    property_get("debug.egl.swapinterval", pval, "-1");
+    property_get("debug.gr.swapinterval", pval, "-1");
     int property_interval = atoi(pval);
     if (property_interval >= 0)
         interval = property_interval;
@@ -165,14 +164,8 @@ static void *disp_loop(void *ptr)
         pthread_mutex_unlock(&m->overlayLock);
 #endif
         if (ioctl(m->framebuffer->fd, FBIOPUT_VSCREENINFO, &m->info) == -1) {
-            LOGE("ERROR FBIOPUT_VSCREENINFO failed; frame not displayed");
+            ALOGE("ERROR FBIOPUT_VSCREENINFO failed; frame not displayed");
         }
-
-        //Signal so that we can close channels if we need to
-        pthread_mutex_lock(&m->bufferPostLock);
-        m->bufferPostDone = true;
-        pthread_cond_signal(&m->bufferPostCond);
-        pthread_mutex_unlock(&m->bufferPostLock);
 
         CALC_FPS();
 
@@ -186,7 +179,7 @@ static void *disp_loop(void *ptr)
         } else {
             pthread_mutex_lock(&(m->avail[nxtBuf.idx].lock));
             if (m->avail[nxtBuf.idx].state != SUB) {
-                LOGE_IF(m->swapInterval != 0, "[%d] state %c, expected %c", nxtBuf.idx,
+                ALOGE_IF(m->swapInterval != 0, "[%d] state %c, expected %c", nxtBuf.idx,
                     framebufferStateName[m->avail[nxtBuf.idx].state],
                     framebufferStateName[SUB]);
             }
@@ -196,7 +189,7 @@ static void *disp_loop(void *ptr)
             pthread_mutex_lock(&(m->avail[cur_buf].lock));
             m->avail[cur_buf].is_avail = true;
             if (m->avail[cur_buf].state != REF) {
-                LOGE_IF(m->swapInterval != 0, "[%d] state %c, expected %c", cur_buf,
+                ALOGE_IF(m->swapInterval != 0, "[%d] state %c, expected %c", cur_buf,
                     framebufferStateName[m->avail[cur_buf].state],
                     framebufferStateName[REF]);
             }
@@ -210,6 +203,14 @@ static void *disp_loop(void *ptr)
 }
 
 #if defined(HDMI_DUAL_DISPLAY)
+static int closeHDMIChannel(private_module_t* m)
+{
+    Overlay* pTemp = m->pobjOverlay;
+    if(pTemp != NULL)
+        pTemp->closeChannel();
+    return 0;
+}
+
 static void getSecondaryDisplayDestinationInfo(private_module_t* m, overlay_rect&
                                 rect, int& orientation)
 {
@@ -252,77 +253,6 @@ static void getSecondaryDisplayDestinationInfo(private_module_t* m, overlay_rect
     return;
 }
 
-static int closeExternalChannel(private_module_t *m)
-{
-    Overlay* pTemp = m->pobjOverlay;
-    if(pTemp != NULL)
-        pTemp->closeChannel();
-    return 0;
-}
-
-static int startExternalChannel(private_module_t *m)
-{
-    Overlay *pTemp = m->pobjOverlay;
-    bool success = true;
-    int flags = WAIT_FOR_VSYNC;
-    if (!pTemp->isChannelUP()) {
-        int alignedW = ALIGN(m->info.xres, 32);
-
-        private_handle_t const* hnd =
-                reinterpret_cast<private_handle_t const*>(m->framebuffer);
-        overlay_buffer_info info;
-        info.width = alignedW;
-        info.height = hnd->height;
-        info.format = hnd->format;
-        info.size = hnd->size / m->numBuffers;
-
-        if (m->trueMirrorSupport)
-            flags &= ~WAIT_FOR_VSYNC;
-        // External display connected during secure video playback
-        // Open secure UI session
-        // NOTE: when external display is already connected and then secure
-        // playback is started, we dont have to do anything
-        if(m->secureVideoOverlay)
-            flags |= SECURE_OVERLAY_SESSION;
-        // start the overlay Channel for mirroring
-        // m->enableHDMIOutput corresponds to the fbnum
-
-        success = pTemp->startChannel(info, m->enableHDMIOutput,
-                        false, true, 0, VG0_PIPE, flags) &&
-                  pTemp->setFd(m->framebuffer->fd) &&
-                  pTemp->setCrop(0, 0, m->info.xres, m->info.yres);
-    }
-
-    overlay_rect destRect;
-    int rot = 0;
-    int currOrientation = 0;
-    int currentX = 0, currentY = 0;
-    uint32_t currentW = 0, currentH = 0;
-
-    getSecondaryDisplayDestinationInfo(m, destRect, rot);
-    pTemp->getOrientation(currOrientation);
-
-    if(rot != currOrientation) {
-        success &= pTemp->setTransform(rot);
-    }
-
-    pTemp->getPosition(currentX, currentY, currentW, currentH);
-
-    if ((currentX != destRect.x) || (currentY != destRect.y) ||
-            (currentW != destRect.w) || (currentH != destRect.h)) {
-        success &= pTemp->setPosition(destRect.x, destRect.y, destRect.w,
-            destRect.h);
-    }
-
-    if (m->trueMirrorSupport) {
-        // if video is started the UI channel should be NO_WAIT.
-        flags = !m->videoOverlay ? WAIT_FOR_VSYNC : 0;
-        pTemp->updateOverlayFlags(flags);
-    }
-
-    return success ? 0 : -1;
-}
-
 static void *hdmi_ui_loop(void *ptr)
 {
     private_module_t* m = reinterpret_cast<private_module_t*>(
@@ -336,13 +266,68 @@ static void *hdmi_ui_loop(void *ptr)
             pthread_mutex_unlock(&m->overlayLock);
             return NULL;
         }
+        bool waitForVsync = true;
         int flags = WAIT_FOR_VSYNC;
-        const int NO_ERROR = 0;
-        Overlay* pTemp = m->pobjOverlay;
-        if(m->hdmiMirroringState == HDMI_UI_MIRRORING) {
-            if (startExternalChannel(m) == NO_ERROR) {
-                pTemp->queueBuffer(m->currentOffset);
+        if (m->pobjOverlay) {
+            Overlay* pTemp = m->pobjOverlay;
+            if (m->hdmiMirroringState == HDMI_NO_MIRRORING)
+                closeHDMIChannel(m);
+            else if(m->hdmiMirroringState == HDMI_UI_MIRRORING) {
+                if (!pTemp->isChannelUP()) {
+                   int alignedW = ALIGN(m->info.xres, 32);
+
+                   private_handle_t const* hnd =
+                      reinterpret_cast<private_handle_t const*>(m->framebuffer);
+                   overlay_buffer_info info;
+                   info.width = alignedW;
+                   info.height = hnd->height;
+                   info.format = hnd->format;
+                   info.size = hnd->size;
+
+                   if (m->trueMirrorSupport)
+                       flags &= ~WAIT_FOR_VSYNC;
+                   // start the overlay Channel for mirroring
+                   // m->enableHDMIOutput corresponds to the fbnum
+                   if (pTemp->startChannel(info, m->enableHDMIOutput,
+                                           false, true, 0, VG0_PIPE, flags)) {
+                        pTemp->setFd(m->framebuffer->fd);
+                        pTemp->setCrop(0, 0, m->info.xres, m->info.yres);
+                   } else
+                       closeHDMIChannel(m);
+                }
+
+                if (pTemp->isChannelUP()) {
+                    overlay_rect destRect;
+                    int rot = 0;
+                    int currOrientation = 0;
+                    getSecondaryDisplayDestinationInfo(m, destRect, rot);
+                    pTemp->getOrientation(currOrientation);
+                    if(rot != currOrientation) {
+                        pTemp->setTransform(rot);
+                    }
+                    EVEN_OUT(destRect.x);
+                    EVEN_OUT(destRect.y);
+                    EVEN_OUT(destRect.w);
+                    EVEN_OUT(destRect.h);
+                    int currentX = 0, currentY = 0;
+                    uint32_t currentW = 0, currentH = 0;
+                    if (pTemp->getPosition(currentX, currentY, currentW, currentH)) {
+                        if ((currentX != destRect.x) || (currentY != destRect.y) ||
+                                (currentW != destRect.w) || (currentH != destRect.h)) {
+                            pTemp->setPosition(destRect.x, destRect.y, destRect.w,
+                                                                    destRect.h);
+                        }
+                    }
+                    if (m->trueMirrorSupport) {
+                        // if video is started the UI channel should be NO_WAIT.
+                        flags = !m->videoOverlay ? WAIT_FOR_VSYNC : 0;
+                        pTemp->updateOverlayFlags(flags);
+                    }
+                    pTemp->queueBuffer(m->currentOffset);
+                }
             }
+            else
+                closeHDMIChannel(m);
         }
         pthread_mutex_unlock(&m->overlayLock);
     }
@@ -361,7 +346,7 @@ static int fb_videoOverlayStarted(struct framebuffer_device_t* dev, int started)
             m->hdmiStateChanged = true;
             if (started && pTemp) {
                 m->hdmiMirroringState = HDMI_NO_MIRRORING;
-                closeExternalChannel(m);
+                closeHDMIChannel(m);
             } else if (m->enableHDMIOutput)
                 m->hdmiMirroringState = HDMI_UI_MIRRORING;
             pthread_cond_signal(&(m->overlayPost));
@@ -380,7 +365,7 @@ static int fb_enableHDMIOutput(struct framebuffer_device_t* dev, int externaltyp
     //Check if true mirroring can be supported
     m->trueMirrorSupport = FrameBufferInfo::getInstance()->canSupportTrueMirroring();
     m->enableHDMIOutput = externaltype;
-    LOGE("In fb_enableHDMIOutput: externaltype = %d", m->enableHDMIOutput);
+    ALOGE("In fb_enableHDMIOutput: externaltype = %d", m->enableHDMIOutput);
     if(externaltype) {
         if (m->trueMirrorSupport) {
             m->hdmiMirroringState = HDMI_UI_MIRRORING;
@@ -390,11 +375,31 @@ static int fb_enableHDMIOutput(struct framebuffer_device_t* dev, int externaltyp
         }
     } else if (!externaltype && pTemp) {
         m->hdmiMirroringState = HDMI_NO_MIRRORING;
-        closeExternalChannel(m);
+        closeHDMIChannel(m);
     }
-    if(m->hdmiMirroringState == HDMI_UI_MIRRORING) {
-        startExternalChannel(m);
-    }
+    m->hdmiStateChanged = true;
+    pthread_cond_signal(&(m->overlayPost));
+    pthread_mutex_unlock(&m->overlayLock);
+    return 0;
+}
+
+
+static int fb_setActionSafeWidthRatio(struct framebuffer_device_t* dev, float asWidthRatio)
+{
+    private_module_t* m = reinterpret_cast<private_module_t*>(
+            dev->common.module);
+    pthread_mutex_lock(&m->overlayLock);
+    m->actionsafeWidthRatio = asWidthRatio;
+    pthread_mutex_unlock(&m->overlayLock);
+    return 0;
+}
+
+static int fb_setActionSafeHeightRatio(struct framebuffer_device_t* dev, float asHeightRatio)
+{
+    private_module_t* m = reinterpret_cast<private_module_t*>(
+                    dev->common.module);
+    pthread_mutex_lock(&m->overlayLock);
+    m->actionsafeHeightRatio = asHeightRatio;
     pthread_mutex_unlock(&m->overlayLock);
     return 0;
 }
@@ -408,124 +413,7 @@ static int fb_orientationChanged(struct framebuffer_device_t* dev, int orientati
     pthread_mutex_unlock(&m->overlayLock);
     return 0;
 }
-
-static int handle_open_secure_start(private_module_t* m) {
-    pthread_mutex_lock(&m->overlayLock);
-    m->hdmiMirroringState = HDMI_NO_MIRRORING;
-    m->secureVideoOverlay = true;
-    closeExternalChannel(m);
-    pthread_mutex_unlock(&m->overlayLock);
-    return 0;
-}
-
-static int handle_open_secure_end(private_module_t* m) {
-    pthread_mutex_lock(&m->overlayLock);
-    if (m->enableHDMIOutput) {
-        if (m->trueMirrorSupport) {
-            m->hdmiMirroringState = HDMI_UI_MIRRORING;
-        } else if(!m->videoOverlay) {
-            m->hdmiMirroringState = HDMI_UI_MIRRORING;
-        }
-        m->hdmiStateChanged = true;
-        pthread_cond_signal(&(m->overlayPost));
-    }
-    pthread_mutex_unlock(&m->overlayLock);
-    return 0;
-}
-
-static int handle_close_secure_start(private_module_t* m) {
-    pthread_mutex_lock(&m->overlayLock);
-    m->hdmiMirroringState = HDMI_NO_MIRRORING;
-    m->secureVideoOverlay = false;
-    closeExternalChannel(m);
-    pthread_mutex_unlock(&m->overlayLock);
-    return 0;
-}
-
-static int handle_close_secure_end(private_module_t* m) {
-    pthread_mutex_lock(&m->overlayLock);
-    if (m->enableHDMIOutput) {
-        if (m->trueMirrorSupport) {
-            m->hdmiMirroringState = HDMI_UI_MIRRORING;
-        } else if(!m->videoOverlay) {
-            m->hdmiMirroringState = HDMI_UI_MIRRORING;
-        }
-        m->hdmiStateChanged = true;
-        pthread_cond_signal(&(m->overlayPost));
-    }
-    pthread_mutex_unlock(&m->overlayLock);
-    return 0;
-}
 #endif
-
-//Wait until framebuffer content is displayed.
-////This is called in the context of threadLoop.
-////Display loop wakes this up after display.
-static int fb_waitForBufferPost(struct framebuffer_device_t* dev)
-{
-    private_module_t* m = reinterpret_cast<private_module_t*>(
-                            dev->common.module);
-    pthread_mutex_lock(&m->bufferPostLock);
-    while(m->bufferPostDone == false) {
-        pthread_cond_wait(&(m->bufferPostCond), &(m->bufferPostLock));
-    }
-    pthread_mutex_unlock(&m->bufferPostLock);
-    return 0;
-}
-
-static int fb_resetBufferPostStatus(struct framebuffer_device_t* dev)
-{
-    private_module_t* m = reinterpret_cast<private_module_t*>(
-                            dev->common.module);
-    pthread_mutex_lock(&m->bufferPostLock);
-    m->bufferPostDone = false;
-    pthread_mutex_unlock(&m->bufferPostLock);
-    return 0;
-}
-
-/* fb_perform - used to add custom event and handle them in fb HAL
- * Used for external display related functions as of now
-*/
-static int fb_perform(struct framebuffer_device_t* dev, int event, int value)
-{
-    private_module_t* m = reinterpret_cast<private_module_t*>(
-            dev->common.module);
-    switch(event) {
-#if defined(HDMI_DUAL_DISPLAY)
-        case EVENT_EXTERNAL_DISPLAY:
-            fb_enableHDMIOutput(dev, value);
-            break;
-        case EVENT_VIDEO_OVERLAY:
-            fb_videoOverlayStarted(dev, value);
-            break;
-        case EVENT_ORIENTATION_CHANGE:
-            fb_orientationChanged(dev, value);
-            break;
-        case EVENT_OPEN_SECURE_START:
-            handle_open_secure_start(m);
-            break;
-        case EVENT_OPEN_SECURE_END:
-            handle_open_secure_end(m);
-            break;
-        case EVENT_CLOSE_SECURE_START:
-            handle_close_secure_start(m);
-            break;
-        case EVENT_CLOSE_SECURE_END:
-            handle_close_secure_end(m);
-            break;
-#endif
-        case EVENT_RESET_POSTBUFFER:
-            fb_resetBufferPostStatus(dev);
-            break;
-        case EVENT_WAIT_POSTBUFFER:
-            fb_waitForBufferPost(dev);
-            break;
-        default:
-            LOGE("In %s: UNKNOWN Event = %d!!!", __FUNCTION__, event);
-            break;
-    }
-    return 0;
- }
 
 static int fb_post(struct framebuffer_device_t* dev, buffer_handle_t buffer)
 {
@@ -568,13 +456,13 @@ static int fb_post(struct framebuffer_device_t* dev, buffer_handle_t buffer)
             // post/queue the new buffer
             pthread_mutex_lock(&(m->avail[nxtIdx].lock));
             if (m->avail[nxtIdx].is_avail != true) {
-                LOGE_IF(m->swapInterval != 0, "Found %d buf to be not avail", nxtIdx);
+                ALOGE_IF(m->swapInterval != 0, "Found %d buf to be not avail", nxtIdx);
             }
 
             m->avail[nxtIdx].is_avail = false;
 
             if (m->avail[nxtIdx].state != AVL) {
-                LOGD("[%d] state %c, expected %c", nxtIdx,
+                ALOGD("[%d] state %c, expected %c", nxtIdx,
                     framebufferStateName[m->avail[nxtIdx].state],
                     framebufferStateName[AVL]);
             }
@@ -628,7 +516,7 @@ static int fb_post(struct framebuffer_device_t* dev, buffer_handle_t buffer)
         m->base.unlock(&m->base, m->framebuffer);
     }
 
-    LOGD_IF(FB_DEBUG, "Framebuffer state: [0] = %c [1] = %c [2] = %c",
+    ALOGD_IF(FB_DEBUG, "Framebuffer state: [0] = %c [1] = %c [2] = %c",
         framebufferStateName[m->avail[0].state],
         framebufferStateName[m->avail[1].state],
         framebufferStateName[m->avail[2].state]);
@@ -685,24 +573,16 @@ int mapFrameBufferLocked(struct private_module_t* module)
         fd = open(name, O_RDWR, 0);
         i++;
     }
-    if (fd < 0) {
-        LOGE("%s: %d: unable to open device fb0",__FUNCTION__,__LINE__);
+    if (fd < 0)
         return -errno;
-    }
 
     struct fb_fix_screeninfo finfo;
-    if (ioctl(fd, FBIOGET_FSCREENINFO, &finfo) == -1) {
-        LOGE("%s: %d: fb icotl fail %s",__FUNCTION__,__LINE__,strerror(errno));
-        close(fd);
+    if (ioctl(fd, FBIOGET_FSCREENINFO, &finfo) == -1)
         return -errno;
-    }
 
     struct fb_var_screeninfo info;
-    if (ioctl(fd, FBIOGET_VSCREENINFO, &info) == -1) {
-        LOGE("%s: %d: fb icotl fail %s",__FUNCTION__,__LINE__,strerror(errno));
-        close(fd);
+    if (ioctl(fd, FBIOGET_VSCREENINFO, &info) == -1)
         return -errno;
-    }
 
     info.reserved[0] = 0;
     info.reserved[1] = 0;
@@ -764,7 +644,7 @@ int mapFrameBufferLocked(struct private_module_t* module)
      * Request NUM_BUFFERS screens (at lest 2 for page flipping)
      */
     int numberOfBuffers = (int)(finfo.smem_len/size);
-    LOGV("num supported framebuffers in kernel = %d", numberOfBuffers);
+    ALOGV("num supported framebuffers in kernel = %d", numberOfBuffers);
 
     if (property_get("debug.gr.numframebuffers", property, NULL) > 0) {
         int num = atoi(property);
@@ -775,7 +655,7 @@ int mapFrameBufferLocked(struct private_module_t* module)
     if (numberOfBuffers > NUM_FRAMEBUFFERS_MAX)
         numberOfBuffers = NUM_FRAMEBUFFERS_MAX;
 
-    LOGV("We support %d buffers", numberOfBuffers);
+    ALOGV("We support %d buffers", numberOfBuffers);
 
     //consider the included hole by 4k alignment
     uint32_t line_length = (info.xres * info.bits_per_pixel / 8);
@@ -785,22 +665,19 @@ int mapFrameBufferLocked(struct private_module_t* module)
     if (ioctl(fd, FBIOPUT_VSCREENINFO, &info) == -1) {
         info.yres_virtual = size / line_length;
         flags &= ~PAGE_FLIP;
-        LOGW("FBIOPUT_VSCREENINFO failed, page flipping not supported");
+        ALOGW("FBIOPUT_VSCREENINFO failed, page flipping not supported");
     }
 
     if (info.yres_virtual < ((size * 2) / line_length) ) {
         // we need at least 2 for page-flipping
         info.yres_virtual = size / line_length;
         flags &= ~PAGE_FLIP;
-        LOGW("page flipping not supported (yres_virtual=%d, requested=%d)",
+        ALOGW("page flipping not supported (yres_virtual=%d, requested=%d)",
                 info.yres_virtual, info.yres*2);
     }
 
-    if (ioctl(fd, FBIOGET_VSCREENINFO, &info) == -1) {
-        LOGE("%s: %d: fb icotl fail %s",__FUNCTION__,__LINE__,strerror(errno));
-        close(fd);
+    if (ioctl(fd, FBIOGET_VSCREENINFO, &info) == -1)
         return -errno;
-    }
 
     if (int(info.width) <= 0 || int(info.height) <= 0) {
         // the driver doesn't return that information
@@ -814,7 +691,7 @@ int mapFrameBufferLocked(struct private_module_t* module)
     //The reserved[4] field is used to store FPS by the driver.
     float fps  = info.reserved[4];
 
-    LOGI(   "using (fd=%d)\n"
+    ALOGI(   "using (fd=%d)\n"
             "id           = %s\n"
             "xres         = %d px\n"
             "yres         = %d px\n"
@@ -836,7 +713,7 @@ int mapFrameBufferLocked(struct private_module_t* module)
             info.blue.offset, info.blue.length
     );
 
-    LOGI(   "width        = %d mm (%f dpi)\n"
+    ALOGI(   "width        = %d mm (%f dpi)\n"
             "height       = %d mm (%f dpi)\n"
             "refresh rate = %.2f Hz\n",
             info.width,  xdpi,
@@ -845,17 +722,11 @@ int mapFrameBufferLocked(struct private_module_t* module)
     );
 
 
-    if (ioctl(fd, FBIOGET_FSCREENINFO, &finfo) == -1) {
-        LOGE("%s: %d: fb icotl fail %s",__FUNCTION__,__LINE__,strerror(errno));
-        close(fd);
+    if (ioctl(fd, FBIOGET_FSCREENINFO, &finfo) == -1)
         return -errno;
-    }
 
-    if (finfo.smem_len <= 0) {
-        LOGE("%s: %d: not a valid FB mem size",__FUNCTION__,__LINE__);
-        close(fd);
+    if (finfo.smem_len <= 0)
         return -errno;
-    }
 
     module->flags = flags;
     module->info = info;
@@ -871,7 +742,7 @@ int mapFrameBufferLocked(struct private_module_t* module)
     if (module->swapInterval < private_module_t::PRIV_MIN_SWAP_INTERVAL ||
         module->swapInterval > private_module_t::PRIV_MAX_SWAP_INTERVAL) {
         module->swapInterval = 1;
-        LOGW("Out of range (%d to %d) value for debug.gr.swapinterval, using 1",
+        ALOGW("Out of range (%d to %d) value for debug.gr.swapinterval, using 1",
              private_module_t::PRIV_MIN_SWAP_INTERVAL,
              private_module_t::PRIV_MAX_SWAP_INTERVAL);
     }
@@ -896,9 +767,7 @@ int mapFrameBufferLocked(struct private_module_t* module)
     /* create display update thread */
     pthread_t thread1;
     if (pthread_create(&thread1, NULL, &disp_loop, (void *) module)) {
-        LOGE("%s: %d: failed to create display loop thread",__FUNCTION__,__LINE__);
-        close(fd);
-        return -errno;
+         return -errno;
     }
 
     /*
@@ -915,8 +784,7 @@ int mapFrameBufferLocked(struct private_module_t* module)
                             module->fbFormat, info.xres, info.yres);
     void* vaddr = mmap(0, fbSize, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
     if (vaddr == MAP_FAILED) {
-        LOGE("Error mapping the framebuffer (%s)", strerror(errno));
-        close(fd);
+        ALOGE("Error mapping the framebuffer (%s)", strerror(errno));
         return -errno;
     }
     module->framebuffer->base = intptr_t(vaddr);
@@ -935,11 +803,8 @@ int mapFrameBufferLocked(struct private_module_t* module)
     module->hdmiMirroringState = HDMI_NO_MIRRORING;
     module->trueMirrorSupport = false;
 #endif
-    pthread_mutex_init(&(module->bufferPostLock), NULL);
-    pthread_cond_init(&(module->bufferPostCond), NULL);
-    module->bufferPostDone = false;
 
-   return 0;
+    return 0;
 }
 
 static int mapFrameBuffer(struct private_module_t* module)
@@ -992,8 +857,14 @@ int fb_device_open(hw_module_t const* module, const char* name,
         dev->device.post            = fb_post;
         dev->device.setUpdateRect = 0;
         dev->device.compositionComplete = fb_compositionComplete;
-        dev->device.lockBuffer = fb_lockBuffer;
-        dev->device.perform = fb_perform;
+        //dev->device.lockBuffer = fb_lockBuffer;
+#if defined(HDMI_DUAL_DISPLAY)
+        dev->device.orientationChanged = fb_orientationChanged;
+        dev->device.videoOverlayStarted = fb_videoOverlayStarted;
+        dev->device.enableHDMIOutput = fb_enableHDMIOutput;
+        dev->device.setActionSafeWidthRatio = fb_setActionSafeWidthRatio;
+        dev->device.setActionSafeHeightRatio = fb_setActionSafeHeightRatio;
+#endif
 
         private_module_t* m = (private_module_t*)module;
         status = mapFrameBuffer(m);
@@ -1009,11 +880,11 @@ int fb_device_open(hw_module_t const* module, const char* name,
             const_cast<float&>(dev->device.fps) = m->fps;
             const_cast<int&>(dev->device.minSwapInterval) = private_module_t::PRIV_MIN_SWAP_INTERVAL;
             const_cast<int&>(dev->device.maxSwapInterval) = private_module_t::PRIV_MAX_SWAP_INTERVAL;
-            const_cast<int&>(dev->device.numFramebuffers) = m->numBuffers;
+            //const_cast<int&>(dev->device.numFramebuffers) = m->numBuffers;
             if (m->finfo.reserved[0] == 0x5444 &&
                     m->finfo.reserved[1] == 0x5055) {
                 dev->device.setUpdateRect = fb_setUpdateRect;
-                LOGD("UPDATE_ON_DEMAND supported");
+                ALOGD("UPDATE_ON_DEMAND supported");
             }
 
             *device = &dev->device.common;
@@ -1062,5 +933,5 @@ msm_copy_buffer(buffer_handle_t handle, int fd,
     blit.req.src_rect.h = blit.req.dst_rect.h = h;
 
     if (ioctl(fd, MSMFB_BLIT, &blit))
-        LOGE("MSMFB_BLIT failed = %d", -errno);
+        ALOGE("MSMFB_BLIT failed = %d", -errno);
 }
