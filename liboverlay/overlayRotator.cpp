@@ -28,22 +28,7 @@ namespace overlay {
 Rotator::~Rotator() {}
 
 Rotator* Rotator::getRotator() {
-    int type = getRotatorHwType();
-    if(type == TYPE_MDP) {
-        return new MdpRot(); //will do reset
-    } else if(type == TYPE_MDSS) {
-        return new MdssRot();
-    } else {
-        ALOGE("%s Unknown h/w type %d", __FUNCTION__, type);
-        return NULL;
-    }
-}
-
-int Rotator::getRotatorHwType() {
-    int mdpVersion = qdutils::MDPVersion::getInstance().getMDPVersion();
-    if (mdpVersion == qdutils::MDSS_V5)
-        return TYPE_MDSS;
-    return TYPE_MDP;
+    return new MdpRot(); //will do reset
 }
 
 bool RotMem::close() {

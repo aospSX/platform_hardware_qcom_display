@@ -165,59 +165,6 @@ private:
     friend Rotator* Rotator::getRotator();
 };
 
-/*
-+* MDSS Rot holds MDSS's rotation related structures.
-+*
-+* */
-class MdssRot : public Rotator {
-public:
-    virtual ~MdssRot();
-    virtual bool init();
-    virtual bool close();
-    virtual void setSource(const utils::Whf& wfh);
-    virtual void setFlags(const utils::eMdpFlags& flags);
-    virtual void setTransform(const utils::eTransform& rot,
-            const bool& rotUsed);
-    virtual bool commit();
-    virtual void setRotations(uint32_t r);
-    virtual void setSrcFB();
-    virtual int getDstMemId() const;
-    virtual uint32_t getDstOffset() const;
-    virtual void setEnable();
-    virtual void setDisable();
-    virtual bool enabled () const;
-    virtual uint32_t getSessId() const;
-    virtual bool queueBuffer(int fd, uint32_t offset);
-    virtual void dump() const;
-
-private:
-    explicit MdssRot();
-    /* remap rot buffers */
-    bool remap(uint32_t numbufs);
-    bool open_i(uint32_t numbufs, uint32_t bufsz);
-    /* Deferred transform calculations */
-    void doTransform();
-    /* reset underlying data, basically memset 0 */
-    void reset();
-
-    /* MdssRot info structure */
-    mdp_overlay   mRotInfo;
-    /* MdssRot data structure */
-    msmfb_overlay_data mRotData;
-    /* Orientation */
-    utils::eTransform mOrientation;
-    /* rotator fd */
-    OvFD mFd;
-    /* Rotator memory manager */
-    RotMem mMem;
-    /* Single Rotator buffer size */
-    uint32_t mBufSize;
-    /* Enable/Disable Mdss Rot*/
-    bool mEnabled;
-
-    friend Rotator* Rotator::getRotator();
-};
-
 } // overlay
 
 #endif // OVERlAY_ROTATOR_H
