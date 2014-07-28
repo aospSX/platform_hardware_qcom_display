@@ -147,8 +147,6 @@ int gpu_context_t::gralloc_alloc_buffer(size_t size, int usage,
         //The EXTERNAL_BLOCK flag is always an add-on
         if (usage & GRALLOC_USAGE_PRIVATE_EXTERNAL_BLOCK) {
             flags |= private_handle_t::PRIV_FLAGS_EXTERNAL_BLOCK;
-        }if (usage & GRALLOC_USAGE_PRIVATE_EXTERNAL_CC) {
-            flags |= private_handle_t::PRIV_FLAGS_EXTERNAL_CC;
         }
     }
 
@@ -206,12 +204,12 @@ int gpu_context_t::alloc_impl(int w, int h, int format, int usage,
 
     //If input format is HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED then based on
     //the usage bits, gralloc assigns a format.
-    if(format == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED) {
-        if(usage & GRALLOC_USAGE_HW_VIDEO_ENCODER)
+    if (format == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED) {
+        if (usage & GRALLOC_USAGE_HW_VIDEO_ENCODER)
             grallocFormat = HAL_PIXEL_FORMAT_YCbCr_420_SP; //NV12
-        else if(usage & GRALLOC_USAGE_HW_CAMERA_READ)
+        else if (usage & GRALLOC_USAGE_HW_CAMERA_READ)
             grallocFormat = HAL_PIXEL_FORMAT_YCrCb_420_SP; //NV21
-        else if(usage & GRALLOC_USAGE_HW_CAMERA_WRITE)
+        else if (usage & GRALLOC_USAGE_HW_CAMERA_WRITE)
             grallocFormat = HAL_PIXEL_FORMAT_YCrCb_420_SP; //NV21
     }
 

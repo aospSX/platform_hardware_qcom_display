@@ -68,7 +68,7 @@ class gpu_context_t : public alloc_device_t {
     static int gralloc_close(struct hw_device_t *dev);
 
     private:
-   IAllocController* mAllocCtrl;
+    IAllocController* mAllocCtrl;
     void getGrallocInformationFromFormat(int inputFormat,
                                          int *bufferType);
 };
