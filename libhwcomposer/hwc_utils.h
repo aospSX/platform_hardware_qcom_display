@@ -46,7 +46,6 @@ class Overlay;
 namespace qhwc {
 //fwrd decl
 class QueuedBufferStore;
-class ExternalDisplay;
 
 struct MDPInfo {
     int version;
@@ -123,7 +122,6 @@ void closeContext(hwc_context_t *ctx);
 void calculate_crop_rects(hwc_rect_t& crop, hwc_rect_t& dst,
         const int fbWidth, const int fbHeight, int orient);
 bool isSecuring(hwc_context_t* ctx);
-bool isExternalActive(hwc_context_t* ctx);
 
 //Sync point impl.
 int hwc_sync(hwc_context_t *ctx, hwc_display_contents_1_t* list, int dpy);
@@ -145,21 +143,6 @@ static inline bool isSecureBuffer(const private_handle_t* hnd) {
 //Return true if buffer is marked locked
 static inline bool isBufferLocked(const private_handle_t* hnd) {
     return (hnd && (private_handle_t::PRIV_FLAGS_HWC_LOCK & hnd->flags));
-}
-
-//Return true if buffer is for external display only
-static inline bool isExtOnly(const private_handle_t* hnd) {
-    return (hnd && (hnd->flags & private_handle_t::PRIV_FLAGS_EXTERNAL_ONLY));
-}
-
-//Return true if buffer is for external display only with a BLOCK flag.
-static inline bool isExtBlock(const private_handle_t* hnd) {
-    return (hnd && (hnd->flags & private_handle_t::PRIV_FLAGS_EXTERNAL_BLOCK));
-}
-
-//Return true if buffer is for external display only with a Close Caption flag.
-static inline bool isExtCC(const private_handle_t* hnd) {
-    return (hnd && (hnd->flags & private_handle_t::PRIV_FLAGS_EXTERNAL_CC));
 }
 
 // Initialize uevent thread
@@ -211,8 +194,6 @@ struct hwc_context_t {
     overlay::Overlay *mOverlay;
     //QService object
     qService::QService *mQService;
-    // External display related information
-    qhwc::ExternalDisplay *mExtDisplay;
     qhwc::MDPInfo mMDP;
     qhwc::DisplayAttributes dpyAttr[HWC_NUM_DISPLAY_TYPES];
     qhwc::ListStats listStats[HWC_NUM_DISPLAY_TYPES];
@@ -225,8 +206,6 @@ struct hwc_context_t {
     bool mSecureMode;
     //Lock to prevent set from being called while blanking
     mutable Locker mBlankLock;
-    //Lock to protect set when detaching external disp
-    mutable Locker mExtSetLock;
     //Vsync
     struct vsync_state vstate;
 };

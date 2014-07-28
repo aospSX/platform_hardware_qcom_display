@@ -22,7 +22,6 @@
 #include <gralloc_priv.h>
 #include <fb_priv.h>
 #include "hwc_fbupdate.h"
-#include "external.h"
 
 namespace qhwc {
 
@@ -34,9 +33,7 @@ ovutils::eDest FBUpdate::sDest[] = {ovutils::OV_INVALID};
 
 void FBUpdate::reset() {
     sModeOn[HWC_DISPLAY_PRIMARY] = false;
-    sModeOn[HWC_DISPLAY_EXTERNAL] = false;
     sDest[HWC_DISPLAY_PRIMARY] = ovutils::OV_INVALID;
-    sDest[HWC_DISPLAY_EXTERNAL] = ovutils::OV_INVALID;
 }
 
 bool FBUpdate::prepare(hwc_context_t *ctx, hwc_layer_1_t *fblayer, int dpy) {

@@ -29,7 +29,6 @@
 #include "hwc_video.h"
 #include "hwc_fbupdate.h"
 #include "hwc_mdpcomp.h"
-#include "external.h"
 
 using namespace qhwc;
 #define VSYNC_DEBUG 0
@@ -71,8 +70,7 @@ static void hwc_registerProcs(struct hwc_composer_device_1* dev,
     ctx->proc = procs;
 
     // Now that we have the functions needed, kick off
-    // the uevent & vsync threads
-    init_uevent_thread(ctx);
+    // the vsync thread
     init_vsync_thread(ctx);
 }
 
@@ -134,28 +132,6 @@ static int hwc_prepare_primary(hwc_composer_device_1 *dev,
     return 0;
 }
 
-static int hwc_prepare_external(hwc_composer_device_1 *dev,
-        hwc_display_contents_1_t *list) {
-    hwc_context_t* ctx = (hwc_context_t*)(dev);
-
-    if (LIKELY(list && list->numHwLayers > 1) &&
-        ctx->dpyAttr[HWC_DISPLAY_EXTERNAL].isActive &&
-        ctx->dpyAttr[HWC_DISPLAY_EXTERNAL].connected) {
-
-        uint32_t last = list->numHwLayers - 1;
-        hwc_layer_1_t *fbLayer = &list->hwLayers[last];
-        if(fbLayer->handle) {
-            setListStats(ctx, list, HWC_DISPLAY_EXTERNAL);
-            reset_layer_prop(ctx, HWC_DISPLAY_EXTERNAL);
-
-            VideoOverlay::prepare(ctx, list, HWC_DISPLAY_EXTERNAL);
-            FBUpdate::prepare(ctx, fbLayer, HWC_DISPLAY_EXTERNAL);
-            ctx->mLayerCache[HWC_DISPLAY_EXTERNAL]->updateLayerCache(list);
-        }
-    }
-    return 0;
-}
-
 static int hwc_prepare(hwc_composer_device_1 *dev, size_t numDisplays,
                        hwc_display_contents_1_t** displays)
 {
@@ -171,10 +147,6 @@ static int hwc_prepare(hwc_composer_device_1 *dev, size_t numDisplays,
         switch(i) {
             case HWC_DISPLAY_PRIMARY:
                 ret = hwc_prepare_primary(dev, list);
-                break;
-            case HWC_DISPLAY_EXTERNAL:
-
-                ret = hwc_prepare_external(dev, list);
                 break;
             default:
                 ret = -EINVAL;
@@ -226,12 +198,6 @@ static int hwc_blank(struct hwc_composer_device_1* dev, int dpy, int blank)
                 ret = ioctl(m->framebuffer->fd, FBIOBLANK, FB_BLANK_POWERDOWN);
             } else {
                 ret = ioctl(m->framebuffer->fd, FBIOBLANK, FB_BLANK_UNBLANK);
-            }
-            break;
-        case HWC_DISPLAY_EXTERNAL:
-            if(blank) {
-                //TODO actual
-            } else {
             }
             break;
         default:
@@ -314,40 +280,6 @@ static int hwc_set_primary(hwc_context_t *ctx, hwc_display_contents_1_t* list) {
     return ret;
 }
 
-static int hwc_set_external(hwc_context_t *ctx,
-        hwc_display_contents_1_t* list) {
-    int ret = 0;
-    Locker::Autolock _l(ctx->mExtSetLock);
-
-    if (LIKELY(list && list->numHwLayers > 1) &&
-        ctx->dpyAttr[HWC_DISPLAY_EXTERNAL].isActive &&
-        ctx->dpyAttr[HWC_DISPLAY_EXTERNAL].connected) {
-        uint32_t last = list->numHwLayers - 1;
-        hwc_layer_1_t *fbLayer = &list->hwLayers[last];
-
-        hwc_sync(ctx, list, HWC_DISPLAY_EXTERNAL);
-
-        if (!VideoOverlay::draw(ctx, list, HWC_DISPLAY_EXTERNAL)) {
-            ALOGE("%s: VideoOverlay::draw fail!", __FUNCTION__);
-            ret = -1;
-        }
-
-        private_handle_t *hnd = (private_handle_t *)fbLayer->handle;
-        if(fbLayer->compositionType == HWC_FRAMEBUFFER_TARGET &&
-                !(fbLayer->flags & HWC_SKIP_LAYER) && hnd) {
-            if (!FBUpdate::draw(ctx, fbLayer, HWC_DISPLAY_EXTERNAL)) {
-                ALOGE("%s: FBUpdate::draw fail!", __FUNCTION__);
-                ret = -1;
-            }
-        }
-        if (!ctx->mExtDisplay->post()) {
-            ALOGE("%s: ctx->mExtDisplay->post fail!", __FUNCTION__);
-            return -1;
-        }
-    }
-    return ret;
-}
-
 static int hwc_set(hwc_composer_device_1 *dev,
                    size_t numDisplays,
                    hwc_display_contents_1_t** displays)
@@ -361,9 +293,6 @@ static int hwc_set(hwc_composer_device_1 *dev,
         switch(i) {
             case HWC_DISPLAY_PRIMARY:
                 ret = hwc_set_primary(ctx, list);
-                break;
-            case HWC_DISPLAY_EXTERNAL:
-                ret = hwc_set_external(ctx, list);
                 break;
             default:
                 ret = -EINVAL;
@@ -388,13 +317,6 @@ int hwc_getDisplayConfigs(struct hwc_composer_device_1* dev, int disp,
             break;
         case HWC_DISPLAY_EXTERNAL:
             ret = -1; //Not connected
-            if(ctx->dpyAttr[HWC_DISPLAY_EXTERNAL].connected) {
-                ret = 0; //NO_ERROR
-                if(*numConfigs > 0) {
-                    configs[0] = 0;
-                    *numConfigs = 1;
-                }
-            }
             break;
     }
     return ret;
@@ -404,10 +326,6 @@ int hwc_getDisplayAttributes(struct hwc_composer_device_1* dev, int disp,
         uint32_t config, const uint32_t* attributes, int32_t* values) {
 
     hwc_context_t* ctx = (hwc_context_t*)(dev);
-    //If hotpluggable displays are inactive return error
-    if(disp == HWC_DISPLAY_EXTERNAL && !ctx->dpyAttr[disp].connected) {
-        return -1;
-    }
 
     //From HWComposer
     static const uint32_t DISPLAY_ATTRIBUTES[] = {

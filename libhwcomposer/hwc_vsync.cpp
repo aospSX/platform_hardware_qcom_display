@@ -24,13 +24,15 @@
 #include <cutils/properties.h>
 #include <utils/Log.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <sys/ioctl.h>
 #include <linux/msm_mdp.h>
 #include <sys/resource.h>
 #include <sys/prctl.h>
+#include <utils/Thread.h>
 #include "hwc_utils.h"
 #include "string.h"
-#include "external.h"
+#include "gr.h"
 
 
 namespace qhwc {
@@ -144,7 +146,7 @@ static void *vsync_loop(void *param)
             cur_timestamp = systemTime();
         }
         // send timestamp to HAL
-        ALOGD_IF (VSYNC_DEBUG, "%s: timestamp %llu sent to HWC for %s",
+        ALOGD_IF(VSYNC_DEBUG, "%s: timestamp %llu sent to HWC for %s",
                   __FUNCTION__, cur_timestamp, "fb0");
         ctx->proc->vsync(ctx->proc, dpy, cur_timestamp);
 

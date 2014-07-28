@@ -24,7 +24,6 @@
 #include "hwc_utils.h"
 #include "hwc_mdpcomp.h"
 #include "mdp_version.h"
-#include "external.h"
 #include "QService.h"
 
 namespace qhwc {
@@ -59,7 +58,6 @@ void initContext(hwc_context_t *ctx)
     ctx->mMDP.version = qdutils::MDPVersion::getInstance().getMDPVersion();
     ctx->mMDP.hasOverlay = qdutils::MDPVersion::getInstance().hasOverlay();
     ctx->mMDP.panel = qdutils::MDPVersion::getInstance().getPanelType();
-    ctx->mExtDisplay = new ExternalDisplay(ctx);
     for (uint32_t i = 0; i < HWC_NUM_DISPLAY_TYPES; i++)
         ctx->mLayerCache[i] = new LayerCache();
     MDPComp::init(ctx);
@@ -84,11 +82,6 @@ void closeContext(hwc_context_t *ctx)
         ctx->mFbDev = NULL;
         close(ctx->dpyAttr[HWC_DISPLAY_PRIMARY].fd);
         ctx->dpyAttr[HWC_DISPLAY_PRIMARY].fd = -1;
-    }
-
-    if(ctx->mExtDisplay) {
-        delete ctx->mExtDisplay;
-        ctx->mExtDisplay = NULL;
     }
 
     pthread_mutex_destroy(&(ctx->vstate.lock));
@@ -232,10 +225,6 @@ void calculate_crop_rects(hwc_rect_t& crop, hwc_rect_t& dst,
     crop_t += crop_h * topCutRatio;
     crop_r -= crop_w * rightCutRatio;
     crop_b -= crop_h * bottomCutRatio;
-}
-
-bool isExternalActive(hwc_context_t* ctx) {
-    return ctx->dpyAttr[HWC_DISPLAY_EXTERNAL].isActive;
 }
 
 int hwc_sync(hwc_context_t *ctx, hwc_display_contents_1_t* list, int dpy) {

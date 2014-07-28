@@ -86,7 +86,7 @@ const char* const Res::barrierFile =
 namespace utils {
 //------------------ defines -----------------------------
 #define FB_DEVICE_TEMPLATE "/dev/graphics/fb%u"
-#define NUM_FB_DEVICES 3
+#define NUM_FB_DEVICES 1
 
 //--------------------------------------------------------
 FrameBufferInfo::FrameBufferInfo() {
@@ -178,7 +178,7 @@ int initOverlay() {
                     minfo->z_order);
             // except the RGB base layer with z_order of -1, clear any
             // other pipes connected to mixer.
-            if((minfo->z_order) != -1) {
+            if ((minfo->z_order) != -1) {
                 int index = minfo->pndx;
                 ALOGD("Unset overlay with index: %d at mixer %d", index, i);
                 if(ioctl(fd, MSMFB_OVERLAY_UNSET, &index) == -1) {
