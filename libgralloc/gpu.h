@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2008 The Android Open Source Project
- * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@
 #include <cutils/ashmem.h>
 
 #include "gralloc_priv.h"
-#include <fb_priv.h>
+#include "fb_priv.h"
 
 namespace gralloc {
 class IAllocController;
@@ -35,12 +35,6 @@ class gpu_context_t : public alloc_device_t {
     public:
     gpu_context_t(const private_module_t* module,
                   IAllocController* alloc_ctrl);
-
-    int gralloc_alloc_framebuffer_locked(size_t size, int usage,
-                                         buffer_handle_t* pHandle);
-
-    int gralloc_alloc_framebuffer(size_t size, int usage,
-                                  buffer_handle_t* pHandle);
 
     int gralloc_alloc_buffer(size_t size, int usage,
                              buffer_handle_t* pHandle,
@@ -68,7 +62,7 @@ class gpu_context_t : public alloc_device_t {
     static int gralloc_close(struct hw_device_t *dev);
 
     private:
-    IAllocController* mAllocCtrl;
+   IAllocController* mAllocCtrl;
     void getGrallocInformationFromFormat(int inputFormat,
                                          int *bufferType);
 };

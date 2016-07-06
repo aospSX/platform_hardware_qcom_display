@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2010 The Android Open Source Project
- * Copyright (C) 2012, Code Aurora Forum. All rights reserved.
+ * Copyright (C) 2012-2013, The Linux Foundation. All rights reserved.
  *
  * Not a Contribution, Apache license notifications and license are
  * retained for attribution purposes only.
@@ -21,16 +21,13 @@
 #include <cutils/properties.h>
 #include <utils/Log.h>
 #include <fcntl.h>
-#include <stdlib.h>
 #include <sys/ioctl.h>
 #include <linux/msm_mdp.h>
 #include <sys/resource.h>
 #include <sys/prctl.h>
-#include <utils/Thread.h>
 #include "hwc_utils.h"
 #include "string.h"
-#include "gr.h"
-
+#include "external.h"
 
 namespace qhwc {
 
@@ -105,9 +102,11 @@ static void *vsync_loop(void *param)
         if (!ctx->vstate.fakevsync) {
             for(int i = 0; i < MAX_RETRY_COUNT; i++) {
                 len = pread(fd_timestamp, vdata, MAX_DATA, 0);
-                if(len < 0 && (errno == EAGAIN || errno == EINTR)) {
-                    ALOGW("%s: vsync read: EAGAIN, retry (%d/%d).",
-                          __FUNCTION__, i, MAX_RETRY_COUNT);
+                if(len < 0 && (errno == EAGAIN ||
+                               errno == EINTR  ||
+                               errno == EBUSY)) {
+                    ALOGW("%s: vsync read: %s, retry (%d/%d).",
+                          __FUNCTION__, strerror(errno), i, MAX_RETRY_COUNT);
                     continue;
                 } else {
                     break;

@@ -20,6 +20,7 @@
 #include "overlayRotator.h"
 #include "overlayUtils.h"
 #include "mdp_version.h"
+#include "gr.h"
 
 namespace ovutils = overlay::utils;
 
@@ -28,7 +29,31 @@ namespace overlay {
 Rotator::~Rotator() {}
 
 Rotator* Rotator::getRotator() {
-    return new MdpRot(); //will do reset
+    int type = getRotatorHwType();
+    if(type == TYPE_MDP) {
+        return new MdpRot(); //will do reset
+    } else if(type == TYPE_MDSS) {
+        return new MdssRot();
+    } else {
+        ALOGE("%s Unknown h/w type %d", __FUNCTION__, type);
+        return NULL;
+    }
+}
+
+uint32_t Rotator::calcOutputBufSize(const utils::Whf& destWhf) {
+    //dummy aligned w & h.
+    int alW = 0, alH = 0;
+    int halFormat = ovutils::getHALFormat(destWhf.format);
+    //A call into gralloc/memalloc
+    return getBufferSizeAndDimensions(
+            destWhf.w, destWhf.h, halFormat, alW, alH);
+}
+
+int Rotator::getRotatorHwType() {
+    int mdpVersion = qdutils::MDPVersion::getInstance().getMDPVersion();
+    if (mdpVersion == qdutils::MDSS_V5)
+        return TYPE_MDSS;
+    return TYPE_MDP;
 }
 
 bool RotMem::close() {
@@ -43,6 +68,67 @@ bool RotMem::close() {
         }
     }
     return ret;
+}
+
+RotMgr::RotMgr() {
+    for(int i = 0; i < MAX_ROT_SESS; i++) {
+        mRot[i] = 0;
+    }
+    mUseCount = 0;
+}
+
+RotMgr::~RotMgr() {
+    clear();
+}
+
+void RotMgr::configBegin() {
+    //Reset the number of objects used
+    mUseCount = 0;
+}
+
+void RotMgr::configDone() {
+    //Remove the top most unused objects. Videos come and go.
+    for(int i = mUseCount; i < MAX_ROT_SESS; i++) {
+        if(mRot[i]) {
+            delete mRot[i];
+            mRot[i] = 0;
+        }
+    }
+}
+
+Rotator* RotMgr::getNext() {
+    //Return a rot object, creating one if necessary
+    overlay::Rotator *rot = NULL;
+    if(mUseCount >= MAX_ROT_SESS) {
+        ALOGE("%s, MAX rotator sessions reached", __func__);
+    } else {
+        if(mRot[mUseCount] == NULL)
+            mRot[mUseCount] = overlay::Rotator::getRotator();
+        rot = mRot[mUseCount++];
+    }
+    return rot;
+}
+
+void RotMgr::clear() {
+    //Brute force obj destruction, helpful in suspend.
+    for(int i = 0; i < MAX_ROT_SESS; i++) {
+        if(mRot[i]) {
+            delete mRot[i];
+            mRot[i] = 0;
+        }
+    }
+    mUseCount = 0;
+}
+
+void RotMgr::getDump(char *buf, size_t len) {
+    for(int i = 0; i < MAX_ROT_SESS; i++) {
+        if(mRot[i]) {
+            mRot[i]->getDump(buf, len);
+        }
+    }
+    char str[32] = {'\0'};
+    snprintf(str, 32, "\n================\n");
+    strncat(buf, str, strlen(str));
 }
 
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -10,7 +10,7 @@
  *     copyright notice, this list of conditions and the following
  *     disclaimer in the documentation and/or other materials provided
  *     with the distribution.
- *   * Neither the name of Code Aurora Forum, Inc. nor the names of its
+ *   * Neither the name of The Linux Foundation nor the names of its
  *     contributors may be used to endorse or promote products derived
  *     from this software without specific prior written permission.
  *
@@ -29,6 +29,7 @@
 
 #include <cutils/log.h>
 #include <fcntl.h>
+#include <dlfcn.h>
 #include "gralloc_priv.h"
 #include "alloc_controller.h"
 #include "memalloc.h"
@@ -36,8 +37,18 @@
 #include "gr.h"
 #include "comptype.h"
 
+#ifdef VENUS_COLOR_FORMAT
+#include <media/msm_media_info.h>
+#else
+#define VENUS_Y_STRIDE(args...) 0
+#define VENUS_Y_SCANLINES(args...) 0
+#define VENUS_BUFFER_SIZE(args...) 0
+#endif
+
 using namespace gralloc;
 using namespace qdutils;
+
+ANDROID_SINGLETON_STATIC_INSTANCE(AdrenoMemInfo);
 
 //Common functions
 static bool canFallback(int usage, bool triedSystem)
@@ -54,8 +65,7 @@ static bool canFallback(int usage, bool triedSystem)
         return false;
     if(triedSystem)
         return false;
-    if(usage & (GRALLOC_HEAP_MASK | GRALLOC_USAGE_PROTECTED |
-                GRALLOC_USAGE_PRIVATE_CP_BUFFER))
+    if(usage & (GRALLOC_HEAP_MASK | GRALLOC_USAGE_PROTECTED))
         return false;
     if(usage & (GRALLOC_HEAP_MASK | GRALLOC_USAGE_PRIVATE_EXTERNAL_ONLY))
         return false;
@@ -66,14 +76,85 @@ static bool canFallback(int usage, bool triedSystem)
 static bool useUncached(int usage)
 {
     // System heaps cannot be uncached
-    if(usage & (GRALLOC_USAGE_PRIVATE_SYSTEM_HEAP |
-                GRALLOC_USAGE_PRIVATE_IOMMU_HEAP))
+    if(usage & GRALLOC_USAGE_PRIVATE_SYSTEM_HEAP)
         return false;
     if (usage & GRALLOC_USAGE_PRIVATE_UNCACHED)
         return true;
     return false;
 }
 
+//-------------- AdrenoMemInfo-----------------------//
+AdrenoMemInfo::AdrenoMemInfo()
+{
+    libadreno_utils = ::dlopen("libadreno_utils.so", RTLD_NOW);
+    if (libadreno_utils) {
+        *(void **)&LINK_adreno_compute_padding = ::dlsym(libadreno_utils,
+                                           "compute_surface_padding");
+    }
+}
+
+AdrenoMemInfo::~AdrenoMemInfo()
+{
+    if (libadreno_utils) {
+        ::dlclose(libadreno_utils);
+    }
+}
+
+int AdrenoMemInfo::getStride(int width, int format)
+{
+    int stride = ALIGN(width, 32);
+    // Currently surface padding is only computed for RGB* surfaces.
+    if (format < 0x7) {
+        int bpp = 4;
+        switch(format)
+        {
+            case HAL_PIXEL_FORMAT_RGB_888:
+                bpp = 3;
+                break;
+            case HAL_PIXEL_FORMAT_RGB_565:
+            case HAL_PIXEL_FORMAT_RGBA_5551:
+            case HAL_PIXEL_FORMAT_RGBA_4444:
+                bpp = 2;
+                break;
+            default: break;
+        }
+        if ((libadreno_utils) && (LINK_adreno_compute_padding)) {
+            int surface_tile_height = 1;   // Linear surface
+            int raster_mode         = 1;   // Adreno TW raster mode.
+            int padding_threshold   = 512; // Threshold for padding surfaces.
+            // the function below expects the width to be a multiple of
+            // 32 pixels, hence we pass stride instead of width.
+            stride = LINK_adreno_compute_padding(stride, bpp,
+                                      surface_tile_height, raster_mode,
+                                      padding_threshold);
+        }
+    } else {
+        switch (format)
+        {
+            case HAL_PIXEL_FORMAT_YCrCb_420_SP_ADRENO:
+                stride = ALIGN(width, 32);
+                break;
+            case HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED:
+                stride = ALIGN(width, 128);
+                break;
+            case HAL_PIXEL_FORMAT_NV12_ENCODEABLE:
+            case HAL_PIXEL_FORMAT_YCbCr_420_SP:
+            case HAL_PIXEL_FORMAT_YCrCb_420_SP:
+            case HAL_PIXEL_FORMAT_YV12:
+            case HAL_PIXEL_FORMAT_YCbCr_422_SP:
+            case HAL_PIXEL_FORMAT_YCrCb_422_SP:
+                stride = ALIGN(width, 16);
+                break;
+            case HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS:
+                stride = VENUS_Y_STRIDE(COLOR_FMT_NV12, width);
+                break;
+            default: break;
+        }
+    }
+    return stride;
+}
+
+//-------------- IAllocController-----------------------//
 IAllocController* IAllocController::sController = NULL;
 IAllocController* IAllocController::getInstance(void)
 {
@@ -107,16 +188,18 @@ int IonController::allocate(alloc_data& data, int usage)
         noncontig = true;
     }
 
-    if(usage & GRALLOC_USAGE_PRIVATE_IOMMU_HEAP)
+    if(usage & GRALLOC_USAGE_PRIVATE_IOMMU_HEAP) {
         ionFlags |= ION_HEAP(ION_IOMMU_HEAP_ID);
+        noncontig = true;
+    }
 
     if(usage & GRALLOC_USAGE_PRIVATE_MM_HEAP)
         ionFlags |= ION_HEAP(ION_CP_MM_HEAP_ID);
 
-    if(usage & GRALLOC_USAGE_PRIVATE_CAMERA_HEAP)
-        ionFlags |= ION_HEAP(ION_CAMERA_HEAP_ID);
+    if(usage & GRALLOC_USAGE_PRIVATE_ADSP_HEAP)
+        ionFlags |= ION_HEAP(ION_ADSP_HEAP_ID);
 
-    if(usage & GRALLOC_USAGE_PRIVATE_CP_BUFFER)
+    if(usage & GRALLOC_USAGE_PROTECTED && !noncontig)
         ionFlags |= ION_SECURE;
 
     // if no flags are set, default to
@@ -167,7 +250,7 @@ size_t getBufferSizeAndDimensions(int width, int height, int format,
 {
     size_t size;
 
-    alignedw = ALIGN(width, 32);
+    alignedw = AdrenoMemInfo::getInstance().getStride(width, format);
     alignedh = ALIGN(height, 32);
     switch (format) {
         case HAL_PIXEL_FORMAT_RGBA_8888:
@@ -193,7 +276,6 @@ size_t getBufferSizeAndDimensions(int width, int height, int format,
             // The chroma plane is subsampled,
             // but the pitch in bytes is unchanged
             // The GPU needs 4K alignment, but the video decoder needs 8K
-            alignedw = ALIGN(width, 128);
             size  = ALIGN( alignedw * alignedh, 8192);
             size += ALIGN( alignedw * ALIGN(height/2, 32), 8192);
             break;
@@ -205,7 +287,6 @@ size_t getBufferSizeAndDimensions(int width, int height, int format,
                 ALOGE("w or h is odd for the YV12 format");
                 return -EINVAL;
             }
-            alignedw = ALIGN(width, 16);
             alignedh = height;
             if (HAL_PIXEL_FORMAT_NV12_ENCODEABLE == format) {
                 // The encoder requires a 2K aligned chroma offset.
@@ -223,14 +304,12 @@ size_t getBufferSizeAndDimensions(int width, int height, int format,
                 ALOGE("width is odd for the YUV422_SP format");
                 return -EINVAL;
             }
-            alignedw = ALIGN(width, 16);
             alignedh = height;
             size = ALIGN(alignedw * alignedh * 2, 4096);
             break;
         case HAL_PIXEL_FORMAT_YCbCr_420_SP_VENUS:
-            size = alignedw*alignedh +
-                  (ALIGN(alignedw/2, 32) * (alignedh/2))*2;
-            size = ALIGN(size, 4096);
+            alignedh = VENUS_Y_SCANLINES(COLOR_FMT_NV12, height);
+            size = VENUS_BUFFER_SIZE(COLOR_FMT_NV12, width, height);
             break;
         default:
             ALOGE("unrecognized pixel format: 0x%x", format);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -10,7 +10,7 @@
  *     copyright notice, this list of conditions and the following
  *     disclaimer in the documentation and/or other materials provided
  *     with the distribution.
- *   * Neither the name of Code Aurora Forum, Inc. nor the names of its
+ *   * Neither the name of The Linux Foundation nor the names of its
  *     contributors may be used to endorse or promote products derived
  *     from this software without specific prior written permission.
  *
@@ -40,6 +40,9 @@
 using gralloc::IonAlloc;
 
 #define ION_DEVICE "/dev/ion"
+#ifdef QCOM_BSP
+#define NEW_ION_API
+#endif
 
 int IonAlloc::open_device()
 {
@@ -66,24 +69,57 @@ int IonAlloc::alloc_buffer(alloc_data& data)
 {
     Locker::Autolock _l(mLock);
     int err = 0;
+#ifndef NEW_ION_API
+    int ionSyncFd = FD_INIT;
+    int iFd = FD_INIT;
+#endif
     struct ion_handle_data handle_data;
     struct ion_fd_data fd_data;
     struct ion_allocation_data ionAllocData;
-
     void *base = 0;
 
     ionAllocData.len = data.size;
     ionAllocData.align = data.align;
-    ionAllocData.heap_mask = data.flags;
+#ifndef NEW_ION_API
+    ionAllocData.flags = data.flags;
+#else
+    ionAllocData.heap_mask = data.flags & ~ION_SECURE;
     ionAllocData.flags = data.uncached ? 0 : ION_FLAG_CACHED;
+    // ToDo: replace usage of alloc data structure with
+    //  ionallocdata structure.
+    if (data.flags & ION_SECURE)
+        ionAllocData.flags |= ION_SECURE;
+#endif
 
     err = open_device();
     if (err)
         return err;
+#ifndef NEW_ION_API
+    if(data.uncached) {
+        // Use the sync FD to alloc and map 93
+        // when we need uncached memory 94
+        ionSyncFd = open(ION_DEVICE, O_RDONLY|O_DSYNC);
+        if(ionSyncFd < 0) {
+            ALOGE("%s: Failed to open ion device - %s",
+                  __FUNCTION__, strerror(errno));
+            return -errno;
+        }
+        iFd = ionSyncFd;
+    } else {
+        iFd = mIonFd;
+    }
 
+    if(ioctl(iFd, ION_IOC_ALLOC, &ionAllocData)) {
+#else
     if(ioctl(mIonFd, ION_IOC_ALLOC, &ionAllocData)) {
+#endif
         err = -errno;
         ALOGE("ION_IOC_ALLOC failed with error - %s", strerror(errno));
+#ifndef NEW_ION_API
+        if(ionSyncFd >= 0)
+            close(ionSyncFd);
+        ionSyncFd = FD_INIT;
+#endif
         return err;
     }
 
@@ -115,6 +151,8 @@ int IonAlloc::alloc_buffer(alloc_data& data)
     data.base = base;
     data.fd = fd_data.fd;
     ioctl(mIonFd, ION_IOC_FREE, &handle_data);
+    ALOGD_IF(DEBUG, "ion: Allocated buffer base:%p size:%d fd:%d",
+          data.base, ionAllocData.len, data.fd);
     return 0;
 }
 
@@ -197,13 +235,18 @@ int IonAlloc::clean_buffer(void *base, size_t size, int offset, int fd)
     flush_data.offset  = offset;
     flush_data.length  = size;
 
+#ifdef NEW_ION_API
     struct ion_custom_data d;
     d.cmd = ION_IOC_CLEAN_INV_CACHES;
     d.arg = (unsigned long int)&flush_data;
 
     if(ioctl(mIonFd, ION_IOC_CUSTOM, &d)) {
+#else
+    if(ioctl(mIonFd, ION_IOC_CLEAN_INV_CACHES, &flush_data)) {
+#endif
         err = -errno;
         ALOGE("%s: ION_IOC_CLEAN_INV_CACHES failed with error - %s",
+
               __FUNCTION__, strerror(errno));
         ioctl(mIonFd, ION_IOC_FREE, &handle_data);
         return err;

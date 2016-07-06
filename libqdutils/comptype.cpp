@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
-
+ * Copyright (C) 2013, The Linux Foundation. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
  * met:
@@ -10,7 +10,7 @@
  *     copyright notice, this list of conditions and the following
  *     disclaimer in the documentation and/or other materials provided
  *     with the distribution.
- *   * Neither the name of The Linux Foundation nor the names of its
+ *   * Neither the name of The Linux Foundation or the names of its
  *     contributors may be used to endorse or promote products derived
  *     from this software without specific prior written permission.
  *
@@ -26,46 +26,8 @@
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef GRALLOC_ALLOCCONTROLLER_H
-#define GRALLOC_ALLOCCONTROLLER_H
 
-namespace gralloc {
+#include<comptype.h>
 
-struct alloc_data;
-class IMemAlloc;
-class IonAlloc;
-
-class IAllocController {
-
-    public:
-    /* Allocate using a suitable method
-     * Returns the type of buffer allocated
-     */
-    virtual int allocate(alloc_data& data, int usage) = 0;
-
-    virtual IMemAlloc* getAllocator(int flags) = 0;
-
-    virtual ~IAllocController() {};
-
-    static IAllocController* getInstance(void);
-
-    private:
-    static IAllocController* sController;
-
-};
-
-class IonController : public IAllocController {
-
-    public:
-    virtual int allocate(alloc_data& data, int usage);
-
-    virtual IMemAlloc* getAllocator(int flags);
-
-    IonController();
-
-    private:
-    IonAlloc* mIonAlloc;
-
-};
-} //end namespace gralloc
-#endif // GRALLOC_ALLOCCONTROLLER_H
+//Instanticate the QCCompositionType Singleton
+ANDROID_SINGLETON_STATIC_INSTANCE(qdutils::QCCompositionType);

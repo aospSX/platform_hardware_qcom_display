@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -27,33 +27,33 @@
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ANDROID_QSERVICE_H
-#define ANDROID_QSERVICE_H
+#ifndef _QDMETADATA_H
+#define _QDMETADATA_H
 
-#include <utils/Errors.h>
-#include <sys/types.h>
-#include <cutils/log.h>
-#include <binder/IServiceManager.h>
-#include <IQService.h>
-#include <IQClient.h>
 
-struct hwc_context_t;
+typedef struct {
+    int32_t hue;
+    float   saturation;
+    int32_t intensity;
+    float   contrast;
+} HSICData_t;
 
-namespace qService {
-// ----------------------------------------------------------------------------
+typedef struct {
+    int32_t operation;
+    int32_t interlaced;
+    HSICData_t hsicData;
+    int32_t sharpness;
+    int32_t video_interface;
+} MetaData_t;
 
-class QService : public BnQService {
-public:
-    virtual ~QService();
-    virtual void securing(uint32_t startEnd);
-    virtual void unsecuring(uint32_t startEnd);
-    virtual void connect(const android::sp<qClient::IQClient>& client);
-    virtual android::status_t screenRefresh();
-    static void init();
-private:
-    QService();
-    android::sp<qClient::IQClient> mClient;
-    static QService *sQService;
-};
-}; // namespace qService
-#endif // ANDROID_QSERVICE_H
+typedef enum {
+    PP_PARAM_HSIC       = 0x0001,
+    PP_PARAM_SHARPNESS  = 0x0002,
+    PP_PARAM_INTERLACED = 0x0004,
+    PP_PARAM_VID_INTFC  = 0x0008
+} DispParamType;
+
+int setMetaData(private_handle_t *handle, DispParamType paramType, void *param);
+
+#endif /* _QDMETADATA_H */
+
