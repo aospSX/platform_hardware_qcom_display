@@ -70,7 +70,7 @@ enum {
      * which can be used for buffers that are not secured for DRM
      * but still need to be protected from screen captures
      */
-    GRALLOC_USAGE_PRIVATE_CP_BUFFER       =       0x00400000,
+    GRALLOC_USAGE_PRIVATE_CAMERA_HEAP       =       0x00400000,
 };
 
 enum {
