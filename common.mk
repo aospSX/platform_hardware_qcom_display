@@ -24,6 +24,10 @@ ifeq ($(TARGET_BOARD_PLATFORM),msm7x30)
     common_flags += -D_MSM7X30_
 endif
 
+ifeq ($(TARGET_BOARD_PLATFORM),msm8660)
+    common_flags += -D_MSM8660_
+endif
+
 ifeq ($(ARCH_ARM_HAVE_NEON),true)
     common_flags += -D__ARM_HAVE_NEON
 endif

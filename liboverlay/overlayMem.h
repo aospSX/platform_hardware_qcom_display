@@ -117,7 +117,7 @@ inline bool OvMem::open(uint32_t numbufs,
         uint32_t bufSz, bool isSecure)
 {
     alloc_data data;
-#ifdef _MSM7X30_
+#if defined(_MSM7X30_) || defined(_MSM8660_)
     int allocFlags = GRALLOC_USAGE_PRIVATE_UI_CONTIG_HEAP;
 #else
     int allocFlags = GRALLOC_USAGE_PRIVATE_IOMMU_HEAP;
